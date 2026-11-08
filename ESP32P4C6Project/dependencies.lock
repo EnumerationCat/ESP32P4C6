@@ -304,6 +304,6 @@ direct_dependencies:
 - espressif/esp_wifi_remote
 - espressif/mqtt
 - idf
-manifest_hash: 0ca7a8c382d44fb1b206a28e0bb724a348c8d345e19d901d041e01dcba550310
+manifest_hash: 959eb0ea07fe8f494ff32759c375adcfe32b185d99de182a72faa71f80b81ffa
 target: esp32p4
 version: 3.0.0

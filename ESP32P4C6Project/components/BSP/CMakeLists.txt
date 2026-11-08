@@ -2,19 +2,26 @@ set(src_dirs
             LED
             LCD
             MYIIC
-            TOUCH)
+            TOUCH
+            MIPI_CAM)
 
 set(include_dirs
             LED
             LCD
             MYIIC
-            TOUCH)
+            TOUCH
+            MIPI_CAM)
 
 set(requires
             esp_driver_gpio
             esp_lcd
             esp_common
-            esp_driver_i2c)
+            esp_driver_i2c
+            esp_driver_ppa
+            esp_mm
+            esp_timer
+            vfs
+            esp_video)
 
 idf_component_register(SRC_DIRS ${src_dirs} INCLUDE_DIRS ${include_dirs} REQUIRES ${requires})
 

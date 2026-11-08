@@ -1,0 +1,5 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/esp_sccb_intf: "^0.0.5"
+  espressif/esp_video: "2.5.0"
+  espressif/esp_cam_sensor: "^2.6.0"
