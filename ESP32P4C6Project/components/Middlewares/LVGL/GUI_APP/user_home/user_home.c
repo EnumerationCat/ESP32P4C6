@@ -3,10 +3,34 @@
 #include "lv_disp.h"
 
 
-
-
-
 lv_obj_t *screen = NULL;
+
+static user_home_camera_cb_t camera_cb = NULL;
+
+
+/**
+ * @brief       注册相机按钮回调
+ * @param       cb: 回调函数
+ * @retval      无
+ */
+void user_home_set_camera_cb(user_home_camera_cb_t cb)
+{
+    camera_cb = cb;
+}
+
+/**
+ * @brief       相机按钮事件回调
+ * @param       e: LVGL事件
+ * @retval      无
+ */
+static void camera_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+    if (camera_cb)
+    {
+        camera_cb();            /* 进入摄像头全屏预览, 触摸屏幕任意位置退出 */
+    }
+}
 
 
 
@@ -27,8 +51,10 @@ void user_home(void)
 
     // 按钮添加文字（相机图标/文字）
     lv_obj_t *btn_label = lv_label_create(button);
-    lv_label_set_text(btn_label, "button");
+    lv_label_set_text(btn_label, "CAM");
     lv_obj_center(btn_label);
+
+    lv_obj_add_event_cb(button, camera_btn_event_cb, LV_EVENT_CLICKED, NULL);
 }
 
 

@@ -26,6 +26,7 @@
 #include "ap_wifi.h"
 #include "onenet_mqtt.h"
 #include "onenet_dm.h"
+#include "mipi_cam.h"
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -58,6 +59,16 @@ static void wifi_state_handler(WIFI_STATE state)
 }
 
 /**
+ * @brief       相机按钮回调(用户界面无返回值)
+ * @param       无
+ * @retval      无
+ */
+static void camera_btn_handler(void)
+{
+    mipi_cam_preview_start();
+}
+
+/**
  * @brief       LVGL任务
  * @param       arg: 未使用
  * @retval      无
@@ -76,8 +87,24 @@ static void lvgl_task(void *arg)
 
     user_home();                        /* 显示主界面 */
 
+    bool preview_was_active = false;
+
     while (1)
     {
+        /* 摄像头全屏预览期间暂停LVGL刷新, 避免和摄像头抢LCD帧缓冲 */
+        if (mipi_cam_preview_active())
+        {
+            preview_was_active = true;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        if (preview_was_active)
+        {
+            preview_was_active = false;
+            lv_obj_invalidate(lv_scr_act());    /* 退出预览后整屏重绘, 恢复界面 */
+        }
+
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
@@ -102,7 +129,14 @@ void app_main(void)
 
     led_init();                 /* LED初始化 */
     lcd_init();                 /* LCD屏初始化 */
-    tp_dev.init();              /* 初始化触摸屏 */
+    tp_dev.init();              /* 初始化触摸屏(同时初始化I2C总线) */
+
+    /* 摄像头只做初始化, 点击界面上的相机按钮后再开始全屏预览 */
+    if (mipi_cam_init() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "mipi camera init failed");
+    }
+    user_home_set_camera_cb(camera_btn_handler);
 
     /* WiFi初始化并连接热点 */
     onenet_dm_init();
