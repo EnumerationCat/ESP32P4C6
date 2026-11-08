@@ -1,0 +1,41 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.extensionActivationMode": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.configureOnEdit": false,
+  "cmake.automaticReconfigure": false,
+  "cmake.autoSelectActiveFolder": false,
+  "cmake.options.advanced": {
+    "build": {
+      "statusBarVisibility": "inherit",
+      "inheritDefault": "hidden"
+    },
+    "launch": {
+      "statusBarVisibility": "inherit",
+      "inheritDefault": "hidden"
+    },
+    "debug": {
+      "statusBarVisibility": "inherit",
+      "inheritDefault": "hidden"
+    }
+  },
+  "idf.openOcdConfigs": [
+    "board/esp32p4-builtin.cfg"
+  ],
+  "idf.port": "detect",
+  "idf.currentSetup": "d:\\esp32IDE\\v6.0.3\\esp-idf",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32p4"
+  },
+  "clangd.path": "D:\\esp32IDE\\.espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Users\\20127\\Desktop\\ESP32\\ESP32P4C6Project\\build"
+],
+"idf.espIdfPathWin": "d:\\esp32IDE\\v6.0.3\\esp-idf",
+"idf.toolsPathWin": "D:\\esp32IDE\\.espressif",
+"idf.pythonInstallPath": "D:\\esp32IDE\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+"idf.portWin": "COM26",
+"idf.flashType": "UART"
+}
