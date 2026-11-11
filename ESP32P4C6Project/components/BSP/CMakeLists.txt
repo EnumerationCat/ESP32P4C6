@@ -3,14 +3,16 @@ set(src_dirs
             LCD
             MYIIC
             TOUCH
-            MIPI_CAM)
+            MIPI_CAM
+            SDMMC)
 
 set(include_dirs
             LED
             LCD
             MYIIC
             TOUCH
-            MIPI_CAM)
+            MIPI_CAM
+            SDMMC)
 
 set(requires
             esp_driver_gpio
@@ -18,8 +20,12 @@ set(requires
             esp_common
             esp_driver_i2c
             esp_driver_ppa
+            esp_driver_sdmmc
+            esp_hw_support
             esp_mm
             esp_timer
+            fatfs
+            sdmmc
             vfs
             esp_video)
 
