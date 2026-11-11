@@ -4,7 +4,8 @@ set(src_dirs
             MYIIC
             TOUCH
             MIPI_CAM
-            SDMMC)
+            SDMMC
+            FLASH_FAT)
 
 set(include_dirs
             LED
@@ -12,7 +13,8 @@ set(include_dirs
             MYIIC
             TOUCH
             MIPI_CAM
-            SDMMC)
+            SDMMC
+            FLASH_FAT)
 
 set(requires
             esp_driver_gpio
@@ -27,6 +29,7 @@ set(requires
             fatfs
             sdmmc
             vfs
+            wear_levelling
             esp_video)
 
 idf_component_register(SRC_DIRS ${src_dirs} INCLUDE_DIRS ${include_dirs} REQUIRES ${requires})

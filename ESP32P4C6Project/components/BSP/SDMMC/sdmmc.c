@@ -3,7 +3,7 @@
 const char* sdmmc_tag = "sdmmc";
 sdmmc_card_t *card = NULL;
 const char mount_point[] = MOUNT_POINT;
-uint8_t sdmmc_mount_flag = 0x00;
+sdmmc_mount_state_t sdmmc_mount_state = SDMMC_MOUNT_STATE_UNMOUNTED;
 
 
 /**
@@ -18,7 +18,7 @@ esp_err_t sdmmc_init(void)
     esp_err_t ret = ESP_OK;
     
     /* 防止多次调用这个函数初始化 */
-    if (sdmmc_mount_flag == 0x01 && card != NULL)
+    if (sdmmc_mount_state == SDMMC_MOUNT_STATE_MOUNTED && card != NULL)
     {
         sdmmc_unmount();    /* 取消挂载 */
     }
@@ -56,13 +56,13 @@ esp_err_t sdmmc_init(void)
             ESP_LOGE(sdmmc_tag, "Failed to initialize the card (%s). "
                      "Make sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
         }
-        sdmmc_mount_flag = 0xFF;
+        sdmmc_mount_state = SDMMC_MOUNT_STATE_FAILED;
         return ESP_FAIL;
     }
 
     /* 打印当前TF卡相关信息 */
     sdmmc_card_print_info(stdout, card);
-    sdmmc_mount_flag = 0x01;
+    sdmmc_mount_state = SDMMC_MOUNT_STATE_MOUNTED;
     return ESP_OK;
 }
 
@@ -74,7 +74,7 @@ esp_err_t sdmmc_init(void)
 esp_err_t sdmmc_unmount(void)
 {
     ESP_ERROR_CHECK(esp_vfs_fat_sdcard_unmount(mount_point, card));
-    sdmmc_mount_flag = 0x00;
+    sdmmc_mount_state = SDMMC_MOUNT_STATE_UNMOUNTED;
     return ESP_OK;
 }
 

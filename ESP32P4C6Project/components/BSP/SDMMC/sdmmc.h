@@ -24,11 +24,19 @@
 #define SDMMC_PIN_D3        GPIO_NUM_42  
 
 /* 挂载点定义 */
-#define MOUNT_POINT         "/sdcard"
+#define MOUNT_POINT         "/User"
+
+/* SD卡挂载状态 */
+typedef enum
+{
+    SDMMC_MOUNT_STATE_UNMOUNTED = 0,    /* 未挂载 */
+    SDMMC_MOUNT_STATE_MOUNTED,          /* 已挂载 */
+    SDMMC_MOUNT_STATE_FAILED,           /* 挂载失败 */
+} sdmmc_mount_state_t;
 
 /* 外部变量声明 */
 extern sdmmc_card_t *card;
-extern uint8_t sdmmc_mount_flag;
+extern sdmmc_mount_state_t sdmmc_mount_state;   /* SD卡挂载状态 */
 
 /* 函数声明 */
 esp_err_t sdmmc_init(void);               /* SD卡初始化并挂载 */
