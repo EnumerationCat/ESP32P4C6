@@ -9,6 +9,7 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				# examples/porting (adapted to the BSP MIPI-DSI panel and GT9xxx touch)
 				LVGL/GUI/lvgl/examples/porting/lv_port_disp.c
 				LVGL/GUI/lvgl/examples/porting/lv_port_indev.c
+				LVGL/GUI/lvgl/examples/porting/lv_port_fs.c
 
 				# src/core
 				LVGL/GUI/lvgl/src/core/lv_disp.c
@@ -287,7 +288,10 @@ set(src_dirs    wifi_manager/wifi_manager.c
 
 				LVGL/GUI_APP/user_home/user_home.c
 				LVGL/GUI_APP/app_shell/app_shell.c
-				LVGL/GUI_APP/app_shell/command.c
+				LVGL/GUI_APP/app_shell/model/shell_core.c
+				LVGL/GUI_APP/app_shell/model/shell_input_uart.c
+				LVGL/GUI_APP/app_shell/model/command.c
+				LVGL/GUI_APP/app_shell/view/shell_view.c
 )
 
 set(include_dirs wifi_manager
@@ -320,6 +324,8 @@ set(include_dirs wifi_manager
 
 				 LVGL/GUI_APP/user_home
 				 LVGL/GUI_APP/app_shell
+				 LVGL/GUI_APP/app_shell/model
+				 LVGL/GUI_APP/app_shell/view
 
 
 )

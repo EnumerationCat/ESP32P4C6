@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "lv_port_disp.h"
 #include "lv_port_indev.h"
+#include "lv_port_fs.h"
 #include "user_home.h"
 #include "app_shell.h"
 #include "wifi_manager.h"
@@ -124,6 +125,7 @@ static void lvgl_task(void *arg)
     lv_init();                          /* 初始化LVGL */
     lv_port_disp_init();                /* 注册显示驱动 */
     lv_port_indev_init();               /* 注册触摸输入 */
+    lv_port_fs_init();                  /* 注册文件系统驱动: D:/User(SD卡), C:/Factory(Flash FAT) */
 
     lv_theme_default_init(NULL, lv_palette_main(LV_PALETTE_BLUE),
                           lv_palette_main(LV_PALETTE_RED),

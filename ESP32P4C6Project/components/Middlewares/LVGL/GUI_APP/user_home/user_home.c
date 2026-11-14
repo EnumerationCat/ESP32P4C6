@@ -74,7 +74,7 @@ void user_home(void)
     lv_obj_set_pos(shell_btn, 190, 130);
 
     lv_obj_t *shell_label = lv_label_create(shell_btn);
-    lv_label_set_text(shell_label, "SHL");
+    lv_label_set_text(shell_label, "shell");
     lv_obj_center(shell_label);
 
     lv_obj_add_event_cb(shell_btn, shell_btn_event_cb, LV_EVENT_CLICKED, NULL);

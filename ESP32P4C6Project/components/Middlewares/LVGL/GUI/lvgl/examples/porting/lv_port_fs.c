@@ -1,53 +1,65 @@
 /**
- * @file lv_port_fs_templ.c
+ * @file lv_port_fs.c
+ * @brief LVGL 文件系统适配: 基于 ESP-IDF VFS(FatFs) 的 POSIX 接口
  *
+ * 盘符与BSP挂载点对应:
+ *   D: -> /User     SD卡        (components/BSP/SDMMC/sdmmc.h: MOUNT_POINT)
+ *   C: -> /Factory  Flash FAT   (components/BSP/FLASH_FAT/flash_fat.h: FACTORY_MOUNT_POINT)
+ * 例如 "D:/img/bg.bmp" 实际以 "/User/img/bg.bmp" 打开。
+ *
+ * 挂载由BSP完成, 本文件只向LVGL注册驱动, 因此 lv_port_fs_init() 需在 lv_init() 之后调用。
+ * LVGL的路径长度上限为 LV_FS_MAX_PATH_LENGTH(256), 拼接挂载点后留一倍余量。
  */
-
- /*Copy this file as "lv_port_fs.c" and set this value to "1" to enable content*/
-#if 0
 
 /*********************
  *      INCLUDES
  *********************/
-#include "lv_port_fs_template.h"
-#include "../../lvgl.h"
+#include "lv_port_fs.h"
+#include "lvgl.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 /*********************
  *      DEFINES
  *********************/
+#define FS_SD_LETTER        'D'         /* SD卡盘符 */
+#define FS_SD_ROOT          "/User"     /* SD卡挂载点 */
+#define FS_FLASH_LETTER     'C'         /* Flash FAT盘符 */
+#define FS_FLASH_ROOT       "/Factory"  /* Flash FAT挂载点 */
+
+/* 拼接后的完整VFS路径缓冲(挂载点 + LVGL路径 + 文件名) */
+#define FS_PATH_BUF         (LV_FS_MAX_PATH_LENGTH + LV_FS_MAX_FN_LENGTH + 8)
 
 /**********************
  *      TYPEDEFS
  **********************/
 
+/* 目录句柄: 保存DIR*和目录完整路径(dir_read中stat每一项需要) */
+typedef struct
+{
+    DIR *dir;
+    char path[FS_PATH_BUF];
+} fs_dir_t;
+
 /**********************
  *  STATIC PROTOTYPES
  **********************/
-static void fs_init(void);
+static void fs_drv_setup(lv_fs_drv_t *drv, char letter, const char *root);
 
-static void * fs_open(lv_fs_drv_t * drv, const char * path, lv_fs_mode_t mode);
-static lv_fs_res_t fs_close(lv_fs_drv_t * drv, void * file_p);
-static lv_fs_res_t fs_read(lv_fs_drv_t * drv, void * file_p, void * buf, uint32_t btr, uint32_t * br);
-static lv_fs_res_t fs_write(lv_fs_drv_t * drv, void * file_p, const void * buf, uint32_t btw, uint32_t * bw);
-static lv_fs_res_t fs_seek(lv_fs_drv_t * drv, void * file_p, uint32_t pos, lv_fs_whence_t whence);
-static lv_fs_res_t fs_size(lv_fs_drv_t * drv, void * file_p, uint32_t * size_p);
-static lv_fs_res_t fs_tell(lv_fs_drv_t * drv, void * file_p, uint32_t * pos_p);
+static void *fs_open(lv_fs_drv_t *drv, const char *path, lv_fs_mode_t mode);
+static lv_fs_res_t fs_close(lv_fs_drv_t *drv, void *file_p);
+static lv_fs_res_t fs_read(lv_fs_drv_t *drv, void *file_p, void *buf, uint32_t btr, uint32_t *br);
+static lv_fs_res_t fs_write(lv_fs_drv_t *drv, void *file_p, const void *buf, uint32_t btw, uint32_t *bw);
+static lv_fs_res_t fs_seek(lv_fs_drv_t *drv, void *file_p, uint32_t pos, lv_fs_whence_t whence);
+static lv_fs_res_t fs_tell(lv_fs_drv_t *drv, void *file_p, uint32_t *pos_p);
 
-static void * fs_dir_open(lv_fs_drv_t * drv, const char *path);
-static lv_fs_res_t fs_dir_read(lv_fs_drv_t * drv, void * rddir_p, char * fn);
-static lv_fs_res_t fs_dir_close(lv_fs_drv_t * drv, void * rddir_p);
-
-/**********************
- *  STATIC VARIABLES
- **********************/
-
-/**********************
- * GLOBAL PROTOTYPES
- **********************/
-
-/**********************
- *      MACROS
- **********************/
+static void *fs_dir_open(lv_fs_drv_t *drv, const char *path);
+static lv_fs_res_t fs_dir_read(lv_fs_drv_t *drv, void *rddir_p, char *fn);
+static lv_fs_res_t fs_dir_close(lv_fs_drv_t *drv, void *rddir_p);
 
 /**********************
  *   GLOBAL FUNCTIONS
@@ -55,210 +67,262 @@ static lv_fs_res_t fs_dir_close(lv_fs_drv_t * drv, void * rddir_p);
 
 void lv_port_fs_init(void)
 {
-    /*----------------------------------------------------
-     * Initialize your storage device and File System
-     * -------------------------------------------------*/
-    fs_init();
+    /* 两个静态驱动描述符: lv_fs_drv_register()只保存指针, 生命周期必须覆盖整个运行期 */
+    static lv_fs_drv_t sd_drv;
+    static lv_fs_drv_t flash_drv;
 
-    /*---------------------------------------------------
-     * Register the file system interface in LVGL
-     *--------------------------------------------------*/
+    fs_drv_setup(&sd_drv, FS_SD_LETTER, FS_SD_ROOT);
+    lv_fs_drv_register(&sd_drv);
 
-    /*Add a simple drive to open images*/
-    static lv_fs_drv_t fs_drv;
-    lv_fs_drv_init(&fs_drv);
-
-    /*Set up fields...*/
-    fs_drv.letter = 'P';
-    fs_drv.open_cb = fs_open;
-    fs_drv.close_cb = fs_close;
-    fs_drv.read_cb = fs_read;
-    fs_drv.write_cb = fs_write;
-    fs_drv.seek_cb = fs_seek;
-    fs_drv.tell_cb = fs_tell;
-
-    fs_drv.dir_close_cb = fs_dir_close;
-    fs_drv.dir_open_cb = fs_dir_open;
-    fs_drv.dir_read_cb = fs_dir_read;
-
-    lv_fs_drv_register(&fs_drv);
+    fs_drv_setup(&flash_drv, FS_FLASH_LETTER, FS_FLASH_ROOT);
+    lv_fs_drv_register(&flash_drv);
 }
 
 /**********************
  *   STATIC FUNCTIONS
  **********************/
 
-/*Initialize your Storage device and File system.*/
-static void fs_init(void)
+/* 用同一套回调注册一个盘符, user_data保存挂载点(如"/User") */
+static void fs_drv_setup(lv_fs_drv_t *drv, char letter, const char *root)
 {
-    /*E.g. for FatFS initialize the SD card and FatFS itself*/
+    lv_fs_drv_init(drv);
 
-    /*You code here*/
+    drv->letter     = letter;
+    drv->cache_size = 0;                    /* 不做LVGL层缓存, 直接走VFS */
+    drv->user_data  = (void *)root;
+
+    drv->open_cb  = fs_open;
+    drv->close_cb = fs_close;
+    drv->read_cb  = fs_read;
+    drv->write_cb = fs_write;
+    drv->seek_cb  = fs_seek;
+    drv->tell_cb  = fs_tell;
+
+    drv->dir_open_cb  = fs_dir_open;
+    drv->dir_read_cb  = fs_dir_read;
+    drv->dir_close_cb = fs_dir_close;
 }
 
-/**
- * Open a file
- * @param drv       pointer to a driver where this function belongs
- * @param path      path to the file beginning with the driver letter (e.g. S:/folder/file.txt)
- * @param mode      read: FS_MODE_RD, write: FS_MODE_WR, both: FS_MODE_RD | FS_MODE_WR
- * @return          a file descriptor or NULL on error
- */
-static void * fs_open(lv_fs_drv_t * drv, const char * path, lv_fs_mode_t mode)
+/* 把LVGL路径(已去掉盘符, 如"/img/bg.bmp")拼成VFS完整路径(如"/User/img/bg.bmp") */
+static bool fs_build_path(lv_fs_drv_t *drv, const char *path, char *buf, size_t cap)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    int n;
 
-    void * f = NULL;
-
-    if(mode == LV_FS_MODE_WR)
+    if (drv == NULL || path == NULL || buf == NULL || cap == 0)
     {
-        /*Open a file for write*/
-        f = ...         /*Add your code here*/
-    }
-    else if(mode == LV_FS_MODE_RD)
-    {
-        /*Open a file for read*/
-        f = ...         /*Add your code here*/
-    }
-    else if(mode == (LV_FS_MODE_WR | LV_FS_MODE_RD))
-    {
-        /*Open a file for read and write*/
-        f = ...         /*Add your code here*/
+        return false;
     }
 
-    return f;
+    n = snprintf(buf, cap, "%s%s", (const char *)drv->user_data, path);
+    return n > 0 && (size_t)n < cap;
 }
 
-/**
- * Close an opened file
- * @param drv       pointer to a driver where this function belongs
- * @param file_p    pointer to a file_t variable. (opened with fs_open)
- * @return          LV_FS_RES_OK: no error or  any error from @lv_fs_res_t enum
- */
-static lv_fs_res_t fs_close(lv_fs_drv_t * drv, void * file_p)
+/* 把fopen模式转换为LVGL打开模式 */
+static void *fs_open(lv_fs_drv_t *drv, const char *path, lv_fs_mode_t mode)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    char buf[FS_PATH_BUF];
+    const char *fmode;
 
-    /*Add your code here*/
+    if (!fs_build_path(drv, path, buf, sizeof(buf)))
+    {
+        return NULL;
+    }
 
-    return res;
+    if (mode == LV_FS_MODE_WR)
+    {
+        fmode = "wb";
+    }
+    else if (mode == LV_FS_MODE_RD)
+    {
+        fmode = "rb";
+    }
+    else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD))
+    {
+        fmode = "r+b";
+    }
+    else
+    {
+        return NULL;
+    }
+
+    return (void *)fopen(buf, fmode);
 }
 
-/**
- * Read data from an opened file
- * @param drv       pointer to a driver where this function belongs
- * @param file_p    pointer to a file_t variable.
- * @param buf       pointer to a memory block where to store the read data
- * @param btr       number of Bytes To Read
- * @param br        the real number of read bytes (Byte Read)
- * @return          LV_FS_RES_OK: no error or  any error from @lv_fs_res_t enum
- */
-static lv_fs_res_t fs_read(lv_fs_drv_t * drv, void * file_p, void * buf, uint32_t btr, uint32_t * br)
+static lv_fs_res_t fs_close(lv_fs_drv_t *drv, void *file_p)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    LV_UNUSED(drv);
 
-    /*Add your code here*/
+    if (file_p == NULL)
+    {
+        return LV_FS_RES_INV_PARAM;
+    }
 
-    return res;
+    return fclose((FILE *)file_p) == 0 ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
 }
 
-/**
- * Write into a file
- * @param drv       pointer to a driver where this function belongs
- * @param file_p    pointer to a file_t variable
- * @param buf       pointer to a buffer with the bytes to write
- * @param btr       Bytes To Write
- * @param br        the number of real written bytes (Bytes Written). NULL if unused.
- * @return          LV_FS_RES_OK: no error or  any error from @lv_fs_res_t enum
- */
-static lv_fs_res_t fs_write(lv_fs_drv_t * drv, void * file_p, const void * buf, uint32_t btw, uint32_t * bw)
+static lv_fs_res_t fs_read(lv_fs_drv_t *drv, void *file_p, void *buf, uint32_t btr, uint32_t *br)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    size_t n;
 
-    /*Add your code here*/
+    LV_UNUSED(drv);
 
-    return res;
+    if (file_p == NULL || br == NULL)
+    {
+        return LV_FS_RES_INV_PARAM;
+    }
+
+    n = fread(buf, 1, btr, (FILE *)file_p);
+    *br = (uint32_t)n;
+
+    /* 读不满且出错才算错误; 到文件尾正常返回 */
+    return (n < btr && ferror((FILE *)file_p)) ? LV_FS_RES_UNKNOWN : LV_FS_RES_OK;
 }
 
-/**
- * Set the read write pointer. Also expand the file size if necessary.
- * @param drv       pointer to a driver where this function belongs
- * @param file_p    pointer to a file_t variable. (opened with fs_open )
- * @param pos       the new position of read write pointer
- * @param whence    tells from where to interpret the `pos`. See @lv_fs_whence_t
- * @return          LV_FS_RES_OK: no error or  any error from @lv_fs_res_t enum
- */
-static lv_fs_res_t fs_seek(lv_fs_drv_t * drv, void * file_p, uint32_t pos, lv_fs_whence_t whence)
+static lv_fs_res_t fs_write(lv_fs_drv_t *drv, void *file_p, const void *buf, uint32_t btw, uint32_t *bw)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    size_t n;
 
-    /*Add your code here*/
+    LV_UNUSED(drv);
 
-    return res;
+    if (file_p == NULL)
+    {
+        return LV_FS_RES_INV_PARAM;
+    }
+
+    n = fwrite(buf, 1, btw, (FILE *)file_p);
+    if (bw != NULL)
+    {
+        *bw = (uint32_t)n;
+    }
+
+    return n == btw ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
 }
-/**
- * Give the position of the read write pointer
- * @param drv       pointer to a driver where this function belongs
- * @param file_p    pointer to a file_t variable.
- * @param pos_p     pointer to to store the result
- * @return          LV_FS_RES_OK: no error or  any error from @lv_fs_res_t enum
- */
-static lv_fs_res_t fs_tell(lv_fs_drv_t * drv, void * file_p, uint32_t * pos_p)
+
+static lv_fs_res_t fs_seek(lv_fs_drv_t *drv, void *file_p, uint32_t pos, lv_fs_whence_t whence)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    int w;
 
-    /*Add your code here*/
+    LV_UNUSED(drv);
 
-    return res;
+    if (file_p == NULL)
+    {
+        return LV_FS_RES_INV_PARAM;
+    }
+
+    switch (whence)
+    {
+        case LV_FS_SEEK_SET: w = SEEK_SET; break;
+        case LV_FS_SEEK_CUR: w = SEEK_CUR; break;
+        case LV_FS_SEEK_END: w = SEEK_END; break;
+        default:             return LV_FS_RES_INV_PARAM;
+    }
+
+    return fseek((FILE *)file_p, (long)pos, w) == 0 ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
 }
 
-/**
- * Initialize a 'lv_fs_dir_t' variable for directory reading
- * @param drv       pointer to a driver where this function belongs
- * @param path      path to a directory
- * @return          pointer to the directory read descriptor or NULL on error
- */
-static void * fs_dir_open(lv_fs_drv_t * drv, const char *path)
+static lv_fs_res_t fs_tell(lv_fs_drv_t *drv, void *file_p, uint32_t *pos_p)
 {
-    void * dir = NULL;
-    /*Add your code here*/
-    dir = ...           /*Add your code here*/
-    return dir;
+    long pos;
+
+    LV_UNUSED(drv);
+
+    if (file_p == NULL || pos_p == NULL)
+    {
+        return LV_FS_RES_INV_PARAM;
+    }
+
+    pos = ftell((FILE *)file_p);
+    if (pos < 0)
+    {
+        return LV_FS_RES_UNKNOWN;
+    }
+
+    *pos_p = (uint32_t)pos;
+    return LV_FS_RES_OK;
 }
 
-/**
- * Read the next filename form a directory.
- * The name of the directories will begin with '/'
- * @param drv       pointer to a driver where this function belongs
- * @param rddir_p   pointer to an initialized 'lv_fs_dir_t' variable
- * @param fn        pointer to a buffer to store the filename
- * @return          LV_FS_RES_OK: no error or  any error from @lv_fs_res_t enum
- */
-static lv_fs_res_t fs_dir_read(lv_fs_drv_t * drv, void * rddir_p, char *fn)
+static void *fs_dir_open(lv_fs_drv_t *drv, const char *path)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    fs_dir_t *d;
 
-    /*Add your code here*/
+    d = (fs_dir_t *)calloc(1, sizeof(fs_dir_t));
+    if (d == NULL)
+    {
+        return NULL;
+    }
 
-    return res;
+    if (!fs_build_path(drv, path, d->path, sizeof(d->path)))
+    {
+        free(d);
+        return NULL;
+    }
+
+    d->dir = opendir(d->path);
+    if (d->dir == NULL)
+    {
+        free(d);
+        return NULL;
+    }
+
+    return d;
 }
 
-/**
- * Close the directory reading
- * @param drv       pointer to a driver where this function belongs
- * @param rddir_p   pointer to an initialized 'lv_fs_dir_t' variable
- * @return          LV_FS_RES_OK: no error or  any error from @lv_fs_res_t enum
- */
-static lv_fs_res_t fs_dir_close(lv_fs_drv_t * drv, void * rddir_p)
+/* 读下一个文件名; 目录名以'/'开头(VFS的dirent不保证d_type, 用stat判断) */
+static lv_fs_res_t fs_dir_read(lv_fs_drv_t *drv, void *rddir_p, char *fn)
 {
-    lv_fs_res_t res = LV_FS_RES_NOT_IMP;
+    fs_dir_t *d = (fs_dir_t *)rddir_p;
+    struct dirent *e;
+    struct stat st;
+    char full[FS_PATH_BUF];
 
-    /*Add your code here*/
+    LV_UNUSED(drv);
 
-    return res;
+    if (d == NULL || d->dir == NULL || fn == NULL)
+    {
+        return LV_FS_RES_INV_PARAM;
+    }
+
+    for (;;)
+    {
+        e = readdir(d->dir);
+        if (e == NULL)
+        {
+            fn[0] = '\0';                   /* 目录结束 */
+            return LV_FS_RES_OK;
+        }
+
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+        {
+            continue;
+        }
+
+        snprintf(full, sizeof(full), "%s/%s", d->path, e->d_name);
+        if (stat(full, &st) == 0 && S_ISDIR(st.st_mode))
+        {
+            snprintf(fn, LV_FS_MAX_FN_LENGTH, "/%s", e->d_name);
+        }
+        else
+        {
+            snprintf(fn, LV_FS_MAX_FN_LENGTH, "%s", e->d_name);
+        }
+
+        return LV_FS_RES_OK;
+    }
 }
 
-#else /*Enable this file at the top*/
+static lv_fs_res_t fs_dir_close(lv_fs_drv_t *drv, void *rddir_p)
+{
+    fs_dir_t *d = (fs_dir_t *)rddir_p;
 
-/*This dummy typedef exists purely to silence -Wpedantic.*/
-typedef int keep_pedantic_happy;
-#endif
+    LV_UNUSED(drv);
+
+    if (d == NULL)
+    {
+        return LV_FS_RES_INV_PARAM;
+    }
+
+    closedir(d->dir);
+    free(d);
+
+    return LV_FS_RES_OK;
+}

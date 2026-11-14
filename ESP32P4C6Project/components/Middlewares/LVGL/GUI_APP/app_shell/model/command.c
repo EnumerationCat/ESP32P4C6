@@ -4,7 +4,7 @@
  */
 
 #include "command.h"
-#include "app_shell.h"
+#include "shell_core.h"
 #include "lcd.h"
 
 
@@ -31,33 +31,33 @@ static int cmd_help(int argc, char **argv)
 
         if (cmd == NULL)
         {
-            app_shell_printf("unknown command: %s\r\n", argv[1]);
+            shell_core_printf("unknown command: %s\r\n", argv[1]);
             return 0;
         }
 
-        app_shell_printf("%s - %s\r\n", cmd->name, cmd->short_help);
+        shell_core_printf("%s - %s\r\n", cmd->name, cmd->short_help);
         if (cmd->long_help != NULL && cmd->long_help[0] != 0)
         {
-            app_shell_printf("  %s\r\n", cmd->long_help);
+            shell_core_printf("  %s\r\n", cmd->long_help);
         }
         return 0;
     }
 
     /* help: 列出所有命令 */
-    app_shell_puts("Commands:\r\n");
+    shell_core_puts("Commands:\r\n");
     for (int i = 0; cmds[i] != NULL; i++)
     {
-        app_shell_printf("  %-8s %s\r\n", cmds[i]->name, cmds[i]->short_help);
+        shell_core_printf("  %-8s %s\r\n", cmds[i]->name, cmds[i]->short_help);
     }
     return 0;
 }
 
 static int cmd_hello(int argc, char **argv)
 {
-    app_shell_printf("hello from ESP32-P4 app_shell! argc=%d\r\n", argc);
+    shell_core_printf("hello from ESP32-P4 app_shell! argc=%d\r\n", argc);
     for (int i = 0; i < argc; i++)
     {
-        app_shell_printf("  argv[%d] = %s\r\n", i, argv[i]);
+        shell_core_printf("  argv[%d] = %s\r\n", i, argv[i]);
     }
     return 0;
 }
@@ -67,8 +67,8 @@ static int cmd_free(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    app_shell_printf("free heap: %u bytes\r\n", (unsigned)esp_get_free_heap_size());
-    app_shell_printf("  internal: %u bytes, psram: %u bytes\r\n",
+    shell_core_printf("free heap: %u bytes\r\n", (unsigned)esp_get_free_heap_size());
+    shell_core_printf("  internal: %u bytes, psram: %u bytes\r\n",
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     return 0;
@@ -79,7 +79,7 @@ static int cmd_clear(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    app_shell_clear();
+    shell_core_clear();
     return 0;
 }
 
@@ -88,7 +88,7 @@ static int cmd_reboot(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    app_shell_puts("rebooting...\r\n");
+    shell_core_puts("rebooting...\r\n");
     LCD_BL(0);                      /* 先关背光, 避免复位期间面板显示默认色 */
     vTaskDelay(pdMS_TO_TICKS(50));
     esp_restart();

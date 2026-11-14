@@ -1,13 +1,10 @@
 /**
- * @file lv_port_fs_templ.h
- *
+ * @file lv_port_fs.h
+ * @brief LVGL 文件系统适配: 基于 ESP-IDF VFS(FatFs) 的 POSIX 接口
  */
 
- /*Copy this file as "lv_port_fs.h" and set this value to "1" to enable content*/
-#if 0
-
-#ifndef LV_PORT_FS_TEMPL_H
-#define LV_PORT_FS_TEMPL_H
+#ifndef LV_PORT_FS_H
+#define LV_PORT_FS_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,18 +15,17 @@ extern "C" {
  *********************/
 #include "lvgl/lvgl.h"
 
-/*********************
- *      DEFINES
- *********************/
-
-/**********************
- *      TYPEDEFS
- **********************/
-
 /**********************
  * GLOBAL PROTOTYPES
  **********************/
- void lv_port_fs_init(void);
+
+/**
+ * @brief       向LVGL注册文件系统驱动
+ * @note        必须在 lv_init() 之后调用; BSP的挂载(sdmmc_init()/flash_fat_init())需在此之前完成
+ * @param       无
+ * @retval      无
+ */
+void lv_port_fs_init(void);
 
 /**********************
  *      MACROS
@@ -39,6 +35,4 @@ extern "C" {
 } /*extern "C"*/
 #endif
 
-#endif /*LV_PORT_FS_TEMPL_H*/
-
-#endif /*Disable/Enable content*/
+#endif /*LV_PORT_FS_H*/
