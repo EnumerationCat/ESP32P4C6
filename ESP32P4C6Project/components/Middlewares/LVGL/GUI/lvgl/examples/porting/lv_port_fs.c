@@ -34,6 +34,9 @@
 /* 拼接后的完整VFS路径缓冲(挂载点 + LVGL路径 + 文件名) */
 #define FS_PATH_BUF         (LV_FS_MAX_PATH_LENGTH + LV_FS_MAX_FN_LENGTH + 8)
 
+/* stat用的完整路径: 目录路径 + '/' + 最长文件名(FatFs LFN为255) + '\0' */
+#define FS_FULL_PATH_BUF    (FS_PATH_BUF + 256 + 1)
+
 /**********************
  *      TYPEDEFS
  **********************/
@@ -273,7 +276,7 @@ static lv_fs_res_t fs_dir_read(lv_fs_drv_t *drv, void *rddir_p, char *fn)
     fs_dir_t *d = (fs_dir_t *)rddir_p;
     struct dirent *e;
     struct stat st;
-    char full[FS_PATH_BUF];
+    char full[FS_FULL_PATH_BUF];
 
     LV_UNUSED(drv);
 
@@ -299,11 +302,12 @@ static lv_fs_res_t fs_dir_read(lv_fs_drv_t *drv, void *rddir_p, char *fn)
         snprintf(full, sizeof(full), "%s/%s", d->path, e->d_name);
         if (stat(full, &st) == 0 && S_ISDIR(st.st_mode))
         {
-            snprintf(fn, LV_FS_MAX_FN_LENGTH, "/%s", e->d_name);
+            /* fn缓冲由LVGL按LV_FS_MAX_FN_LENGTH分配, 超长文件名显式截断 */
+            snprintf(fn, LV_FS_MAX_FN_LENGTH, "/%.*s", LV_FS_MAX_FN_LENGTH - 2, e->d_name);
         }
         else
         {
-            snprintf(fn, LV_FS_MAX_FN_LENGTH, "%s", e->d_name);
+            snprintf(fn, LV_FS_MAX_FN_LENGTH, "%.*s", LV_FS_MAX_FN_LENGTH - 1, e->d_name);
         }
 
         return LV_FS_RES_OK;

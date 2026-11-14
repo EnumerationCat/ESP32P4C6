@@ -25,7 +25,8 @@ extern "C" {
  *********************/
 #define SHELL_UART_NUM       UART_NUM_0
 #define SHELL_UART_BAUD      115200
-#define SHELL_PROMPT         "app_shell> "
+#define SHELL_CWD_HOME       "/User"   /* shell默认目录(SD卡挂载点) */
+#define SHELL_CWD_MAX        192       /* 当前目录路径缓冲 */
 #define SHELL_LINE_MAX       128
 #define SHELL_BUF_SIZE       4096      /* 终端文本缓冲(字节) */
 #define SHELL_HIST_MAX       16        /* 命令历史条数 */
@@ -120,6 +121,30 @@ void shell_core_reset_to_prompt(void);
  * @retval      无
  */
 void shell_core_request_prompt(void);
+
+/**
+ * @brief       设置shell当前目录(提示符随之变化)
+ * @note        必须是绝对VFS路径(以'/'开头); cd命令调用
+ * @param       path: 绝对路径, 如 "/User/img"
+ * @retval      无
+ */
+void shell_core_set_cwd(const char *path);
+
+/**
+ * @brief       拷贝shell当前目录
+ * @param       buf: 输出缓冲
+ * @param       cap: 输出缓冲大小(含'\0')
+ * @retval      写入的字符串长度
+ */
+size_t shell_core_get_cwd(char *buf, size_t cap);
+
+/**
+ * @brief       组装当前提示符 "<cwd>> "
+ * @param       buf: 输出缓冲
+ * @param       cap: 输出缓冲大小(含'\0')
+ * @retval      无
+ */
+void shell_core_prompt(char *buf, size_t cap);
 
 /**********************
  *      MACROS

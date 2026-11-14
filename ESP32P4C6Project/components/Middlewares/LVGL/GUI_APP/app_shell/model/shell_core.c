@@ -58,6 +58,67 @@ typedef struct
 static shell_console_t s_console;
 static QueueHandle_t s_key_q;      /* 输入字节队列: 各输入源 -> shell任务 */
 static bool s_started;
+static char s_cwd[SHELL_CWD_MAX] = SHELL_CWD_HOME;   /* 当前目录(受 s_console.lock 保护) */
+
+/**********************
+ *   当前目录与提示符
+ **********************/
+
+/* 组装 "<cwd>> "(调用者需持有 s_console.lock) */
+static void prompt_build_locked(char *buf, size_t cap)
+{
+    snprintf(buf, cap, "%s> ", s_cwd);
+}
+
+void shell_core_set_cwd(const char *path)
+{
+    if (path == NULL || path[0] != '/' || s_console.lock == NULL)
+    {
+        return;
+    }
+
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    snprintf(s_cwd, sizeof(s_cwd), "%s", path);
+    xSemaphoreGive(s_console.lock);
+}
+
+size_t shell_core_get_cwd(char *buf, size_t cap)
+{
+    if (buf == NULL || cap == 0)
+    {
+        return 0;
+    }
+
+    if (s_console.lock == NULL)
+    {
+        snprintf(buf, cap, "%s", SHELL_CWD_HOME);
+        return strlen(buf);
+    }
+
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    snprintf(buf, cap, "%s", s_cwd);
+    xSemaphoreGive(s_console.lock);
+
+    return strlen(buf);
+}
+
+void shell_core_prompt(char *buf, size_t cap)
+{
+    if (buf == NULL || cap == 0)
+    {
+        return;
+    }
+
+    if (s_console.lock == NULL)
+    {
+        snprintf(buf, cap, "%s> ", SHELL_CWD_HOME);
+        return;
+    }
+
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    prompt_build_locked(buf, cap);
+    xSemaphoreGive(s_console.lock);
+}
 
 /**********************
  *   UART / 文本缓冲输出
@@ -161,6 +222,15 @@ void shell_core_puts(const char *s)
     shell_write(s, strlen(s));
 }
 
+/* 打印当前提示符到UART和终端缓冲 */
+static void shell_print_prompt(void)
+{
+    char prompt[SHELL_CWD_MAX + 4];
+
+    shell_core_prompt(prompt, sizeof(prompt));
+    shell_core_puts(prompt);
+}
+
 void shell_core_vprintf(const char *fmt, va_list ap)
 {
     char buf[256];
@@ -200,11 +270,14 @@ void shell_core_clear(void)
 
 void shell_core_reset_to_prompt(void)
 {
+    char prompt[SHELL_CWD_MAX + 4];
+
     xSemaphoreTake(s_console.lock, portMAX_DELAY);
     s_console.len = 0;
     s_console.text[0] = 0;
     s_console.cursor_col = 0;
-    for (const char *p = SHELL_PROMPT; *p != 0; p++)
+    prompt_build_locked(prompt, sizeof(prompt));
+    for (const char *p = prompt; *p != 0; p++)
     {
         term_putc_locked(*p);
     }
@@ -327,9 +400,11 @@ static void term_set_current_line_locked(const char *text)
 /* 重画输入行: UART用ANSI转义序列, 终端缓冲整行替换; cursor 为光标在 text 中的位置 */
 static void shell_redraw_line(const char *text, size_t cursor)
 {
-    char uart_line[SHELL_LINE_MAX + 48];
-    char lcd_line[SHELL_LINE_MAX + 16];
+    char prompt[SHELL_CWD_MAX + 4];
+    char uart_line[SHELL_LINE_MAX + SHELL_CWD_MAX + 32];
+    char lcd_line[SHELL_LINE_MAX + SHELL_CWD_MAX + 8];
     size_t tlen = strlen(text);
+    size_t plen;
     int n;
 
     if (cursor > tlen)
@@ -337,8 +412,11 @@ static void shell_redraw_line(const char *text, size_t cursor)
         cursor = tlen;
     }
 
+    shell_core_prompt(prompt, sizeof(prompt));
+    plen = strlen(prompt);
+
     /* \r回到行首, 打印提示符和整行, \x1b[K 清掉行尾残留 */
-    n = snprintf(uart_line, sizeof(uart_line), "\r" SHELL_PROMPT "%s\x1b[K", text);
+    n = snprintf(uart_line, sizeof(uart_line), "\r%s%s\x1b[K", prompt, text);
     if (n > 0)
     {
         if (n > (int)sizeof(uart_line) - 1)
@@ -362,11 +440,11 @@ static void shell_redraw_line(const char *text, size_t cursor)
         }
     }
 
-    snprintf(lcd_line, sizeof(lcd_line), SHELL_PROMPT "%s", text);
+    snprintf(lcd_line, sizeof(lcd_line), "%s%s", prompt, text);
 
     xSemaphoreTake(s_console.lock, portMAX_DELAY);
     term_set_current_line_locked(lcd_line);
-    s_console.cursor_col = (int)(strlen(SHELL_PROMPT) + cursor);   /* 光标所在的显示列 */
+    s_console.cursor_col = (int)(plen + cursor);   /* 光标所在的显示列 */
     xSemaphoreGive(s_console.lock);
 }
 
@@ -413,7 +491,7 @@ static void shell_task(void *arg)
     line[0] = 0;
 
     shell_core_puts("\r\nESP32-P4 app_shell ready. Type 'help'.\r\n");
-    shell_core_puts(SHELL_PROMPT);
+    shell_print_prompt();
 
     for (;;)
     {
@@ -428,7 +506,11 @@ static void shell_task(void *arg)
                 s_console.prompt_req = false;
                 if (len == 0)
                 {
-                    shell_raw("\r\n" SHELL_PROMPT);
+                    char prompt[SHELL_CWD_MAX + 4];
+
+                    shell_core_prompt(prompt, sizeof(prompt));
+                    shell_raw("\r\n");
+                    shell_raw(prompt);
                 }
             }
             continue;
@@ -526,7 +608,7 @@ static void shell_task(void *arg)
             cursor = 0;
             line[0] = 0;                /* 清掉旧命令, 否则下次插入会把它搬回来 */
             s_console.hist_pos = s_console.hist_count;
-            shell_core_puts(SHELL_PROMPT);
+            shell_print_prompt();
             continue;
         }
         last_cr = false;
@@ -551,7 +633,8 @@ static void shell_task(void *arg)
             cursor = 0;
             line[0] = 0;
             s_console.hist_pos = s_console.hist_count;
-            shell_core_puts("^C\r\n" SHELL_PROMPT);
+            shell_core_puts("^C\r\n");
+            shell_print_prompt();
             continue;
         }
 

@@ -18,6 +18,7 @@
 #include "onenet_dm.h"
 #include "mipi_cam.h"
 #include "sdmmc.h"
+#include "flash_fat.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -51,59 +52,6 @@ static void wifi_state_handler(WIFI_STATE state)
 }
 
 /**
- * @brief       SD卡读写测试: 挂载 -> 写文件 -> 读回校验
- * @note        测试成功后保持挂载, 不调用sdmmc_unmount()。
- *              本板SDMMC控制器由ESP-Hosted(C6 SDIO)先创建, 卸载时会尝试删除
- *              共享控制器并打印"host controller with slot registered"错误日志,
- *              实际卸载仍返回成功, 只是日志有误导性。
- * @param       无
- * @retval      无
- */
-static void sd_card_test(void)
-{
-    const char *file_path = MOUNT_POINT "/sd_test.txt";
-    const char *payload = "ESP32-P4 SD card read/write test OK!\n";
-    char read_buf[64] = {0};
-
-    if (sdmmc_init() != ESP_OK)
-    {
-        ESP_LOGE(TAG, "SD card mount failed");
-        return;
-    }
-
-    /* 写入测试文件 */
-    FILE *fp = fopen(file_path, "w");
-    if (fp == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to open %s for writing", file_path);
-        return;
-    }
-    size_t written = fwrite(payload, 1, strlen(payload), fp);
-    fclose(fp);
-    ESP_LOGI(TAG, "Wrote %u bytes to %s", (unsigned)written, file_path);
-
-    /* 读回并比对 */
-    fp = fopen(file_path, "r");
-    if (fp == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to open %s for reading", file_path);
-        return;
-    }
-    size_t read_len = fread(read_buf, 1, sizeof(read_buf) - 1, fp);
-    fclose(fp);
-
-    if (read_len == written && strcmp(read_buf, payload) == 0)
-    {
-        ESP_LOGI(TAG, "SD card read/write test PASSED: \"%s\"", read_buf);
-    }
-    else
-    {
-        ESP_LOGE(TAG, "SD card read/write test FAILED, read %u bytes: \"%s\"",
-                 (unsigned)read_len, read_buf);
-    }
-}
-
-/**
  * @brief       相机按钮回调(用户界面无返回值)
  * @param       无
  * @retval      无
@@ -125,7 +73,7 @@ static void lvgl_task(void *arg)
     lv_init();                          /* 初始化LVGL */
     lv_port_disp_init();                /* 注册显示驱动 */
     lv_port_indev_init();               /* 注册触摸输入 */
-    lv_port_fs_init();                  /* 注册文件系统驱动: D:/User(SD卡), C:/Factory(Flash FAT) */
+    lv_port_fs_init();                  /* 注册文件系统驱动: D: = /User(SD卡), C: = /Factory(Flash FAT) */
 
     lv_theme_default_init(NULL, lv_palette_main(LV_PALETTE_BLUE),
                           lv_palette_main(LV_PALETTE_RED),
@@ -176,7 +124,8 @@ void app_main(void)
 
     app_shell_init();           /* 串口命令行(UART0): help/hello/free/clear/reboot, 输出镜像到LCD */
 
-    sd_card_test();             /* SD卡读写测试 */
+    sdmmc_init();               /* 挂载SD卡: LVGL文件系统盘符 D: -> /User */
+    flash_fat_init();           /* 挂载Flash FAT分区: LVGL文件系统盘符 C: -> /Factory */
 
     led_init();                 /* LED初始化 */
     lcd_init();                 /* LCD屏初始化 */
