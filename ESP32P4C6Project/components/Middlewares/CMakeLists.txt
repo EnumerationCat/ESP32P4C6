@@ -286,6 +286,8 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				LVGL/GUI_APP/demos/benchmark/assets/lv_font_bechmark_montserrat_28_compr_az.c.c
 
 				LVGL/GUI_APP/user_home/user_home.c
+				LVGL/GUI_APP/app_shell/app_shell.c
+				LVGL/GUI_APP/app_shell/command.c
 )
 
 set(include_dirs wifi_manager
@@ -317,12 +319,14 @@ set(include_dirs wifi_manager
 
 
 				 LVGL/GUI_APP/user_home
+				 LVGL/GUI_APP/app_shell
 
-				 
+
 )
 
 set(requires driver
 			 esp_lcd
+			 esp_driver_uart
 			 esp_wifi
              esp_event
 			 esp_http_server
