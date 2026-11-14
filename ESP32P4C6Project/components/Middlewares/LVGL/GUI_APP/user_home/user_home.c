@@ -1,4 +1,5 @@
 #include "user_home.h"
+#include "app_shell.h"
 #include "lv_btn.h"
 #include "lv_disp.h"
 
@@ -32,6 +33,17 @@ static void camera_btn_event_cb(lv_event_t *e)
     }
 }
 
+/**
+ * @brief       命令行按钮事件回调
+ * @param       e: LVGL事件
+ * @retval      无
+ */
+static void shell_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+    app_shell_open();           /* 切换到LCD文本页, 点HOME返回 */
+}
+
 
 
 
@@ -55,6 +67,17 @@ void user_home(void)
     lv_obj_center(btn_label);
 
     lv_obj_add_event_cb(button, camera_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    // ==================== 命令行页面按钮 ====================
+    lv_obj_t *shell_btn = lv_btn_create(object);
+    lv_obj_set_size(shell_btn, 60, 60);
+    lv_obj_set_pos(shell_btn, 190, 130);
+
+    lv_obj_t *shell_label = lv_label_create(shell_btn);
+    lv_label_set_text(shell_label, "SHL");
+    lv_obj_center(shell_label);
+
+    lv_obj_add_event_cb(shell_btn, shell_btn_event_cb, LV_EVENT_CLICKED, NULL);
 }
 
 

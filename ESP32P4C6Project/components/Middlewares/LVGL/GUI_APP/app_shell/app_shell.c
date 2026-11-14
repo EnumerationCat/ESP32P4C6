@@ -1,0 +1,558 @@
+/**
+ * @file app_shell.c
+ * @brief 串口命令行(UART0 115200)，输出同时镜像到 LCD 文本页
+ *
+ * 设计说明:
+ *  - 输入: 自定义UART行编辑器(支持退格/Ctrl-C/上下键历史), 不依赖esp_console,
+ *          这样提示符、回显和命令输出都能完整镜像到LCD。
+ *  - 输出: shell_write() 同时写UART和RAM终端缓冲; LVGL任务通过 app_shell_tick()
+ *          把缓冲刷到lv_label上, 保证所有LVGL调用都在LVGL任务里完成。
+ *  - 命令: 命令表在 command.c/h 中, 结构参考 GD32 bootloader。
+ */
+
+#include "app_shell.h"
+#include "command.h"
+#include "lvgl.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "driver/uart.h"
+#include "esp_log.h"
+
+#include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+#include <stdbool.h>
+
+static const char *TAG = "APP_SHELL";
+
+/**********************
+ *   STATIC VARIABLES
+ **********************/
+static shell_console_t s_console;
+static shell_ui_t s_ui;
+
+/**********************
+ *   UART / 镜像输出
+ **********************/
+
+/* 仅写UART, 不镜像(用于ANSI控制字符) */
+static void shell_raw(const char *s)
+{
+    uart_write_bytes(SHELL_UART_NUM, s, strlen(s));
+}
+
+/* 从缓冲头部删除一整行, 用于滚动 */
+static void term_drop_first_line_locked(void)
+{
+    char *nl = memchr(s_console.text, '\n', s_console.len);
+
+    if (nl == NULL)
+    {
+        s_console.len = 0;
+        s_console.text[0] = 0;
+        s_console.cursor_col = 0;
+        return;
+    }
+
+    size_t drop = (size_t)(nl - s_console.text) + 1;
+    memmove(s_console.text, s_console.text + drop, s_console.len - drop);
+    s_console.len -= drop;
+    s_console.text[s_console.len] = 0;
+}
+
+/* 终端字符写入(调用者需持有 s_console.lock) */
+static void term_putc_locked(char c)
+{
+    if (c == '\r')
+    {
+        s_console.cursor_col = 0;
+        return;
+    }
+
+    if (c == '\n')
+    {
+        if (s_console.len >= SHELL_BUF_SIZE)
+        {
+            term_drop_first_line_locked();
+        }
+        s_console.text[s_console.len++] = '\n';
+        s_console.text[s_console.len] = 0;
+        s_console.cursor_col = 0;
+        s_console.dirty = true;
+        return;
+    }
+
+    if (c == '\b')
+    {
+        if (s_console.cursor_col > 0 && s_console.len > 0)
+        {
+            s_console.len--;
+            s_console.text[s_console.len] = 0;
+            s_console.cursor_col--;
+            s_console.dirty = true;
+        }
+        return;
+    }
+
+    if ((unsigned char)c < 0x20 || c == 0x7f)
+    {
+        return;
+    }
+
+    if (s_console.len >= SHELL_BUF_SIZE)
+    {
+        term_drop_first_line_locked();
+    }
+    s_console.text[s_console.len++] = c;
+    s_console.text[s_console.len] = 0;
+    s_console.cursor_col++;
+    s_console.dirty = true;
+}
+
+/* 同时输出到UART和LCD镜像缓冲 */
+static void shell_write(const char *s, size_t n)
+{
+    if (n == 0)
+    {
+        return;
+    }
+
+    uart_write_bytes(SHELL_UART_NUM, s, n);
+
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    for (size_t i = 0; i < n; i++)
+    {
+        term_putc_locked(s[i]);
+    }
+    s_console.dirty = true;
+    xSemaphoreGive(s_console.lock);
+}
+
+void app_shell_puts(const char *s)
+{
+    shell_write(s, strlen(s));
+}
+
+void app_shell_printf(const char *fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    if (n < 0)
+    {
+        return;
+    }
+    if (n > (int)sizeof(buf) - 1)
+    {
+        n = (int)sizeof(buf) - 1;
+    }
+    shell_write(buf, (size_t)n);
+}
+
+void app_shell_clear(void)
+{
+    shell_raw("\x1b[2J\x1b[H");   /* 清屏并归位(UART终端) */
+
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    s_console.len = 0;
+    s_console.text[0] = 0;
+    s_console.cursor_col = 0;
+    s_console.dirty = true;
+    xSemaphoreGive(s_console.lock);
+}
+
+/* 只清LCD镜像并写一行提示符, 不动UART终端 */
+static void shell_mirror_reset_to_prompt(void)
+{
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    s_console.len = 0;
+    s_console.text[0] = 0;
+    s_console.cursor_col = 0;
+    for (const char *p = SHELL_PROMPT; *p != 0; p++)
+    {
+        term_putc_locked(*p);
+    }
+    s_console.dirty = true;
+    xSemaphoreGive(s_console.lock);
+}
+
+/**********************
+ *   命令管理
+ **********************/
+
+/* 解析并执行一行命令 */
+static void shell_exec(char *line)
+{
+    char *argv[8];
+    int argc = 0;
+    char *save = NULL;
+
+    for (char *tok = strtok_r(line, " \t", &save);
+         tok != NULL && argc < (int)(sizeof(argv) / sizeof(argv[0]));
+         tok = strtok_r(NULL, " \t", &save))
+    {
+        argv[argc++] = tok;
+    }
+
+    if (argc == 0)
+    {
+        return;
+    }
+
+    struct command *cmd = find_cmd(argv[0]);
+    if (cmd == NULL)
+    {
+        app_shell_printf("unknown command: %s (type 'help')\r\n", argv[0]);
+        return;
+    }
+    cmd->function(argc, argv);
+}
+
+/**********************
+ *   命令历史
+ **********************/
+
+static void hist_push(const char *line)
+{
+    if (line[0] == 0)
+    {
+        return;
+    }
+    if (s_console.hist_count > 0 && strcmp(s_console.hist[s_console.hist_count - 1], line) == 0)
+    {
+        return;
+    }
+    if (s_console.hist_count == SHELL_HIST_MAX)
+    {
+        memmove(s_console.hist[0], s_console.hist[1], (SHELL_HIST_MAX - 1) * SHELL_LINE_MAX);
+        s_console.hist_count--;
+    }
+    snprintf(s_console.hist[s_console.hist_count], SHELL_LINE_MAX, "%s", line);
+    s_console.hist_count++;
+}
+
+/* 用整行替换LCD镜像中的当前输入行(调用者需持有 s_console.lock) */
+static void term_set_current_line_locked(const char *text)
+{
+    size_t start = s_console.len;
+
+    while (start > 0 && s_console.text[start - 1] != '\n')
+    {
+        start--;
+    }
+    s_console.len = start;
+    s_console.text[s_console.len] = 0;
+    s_console.cursor_col = 0;
+    s_console.dirty = true;
+
+    while (*text != 0)
+    {
+        term_putc_locked(*text++);
+    }
+}
+
+/* 重画输入行: UART用ANSI转义序列, LCD镜像整行替换 */
+static void shell_redraw_line(const char *partial)
+{
+    char uart_line[SHELL_LINE_MAX + 32];
+    char lcd_line[SHELL_LINE_MAX + 16];
+    int n = snprintf(uart_line, sizeof(uart_line),
+                     "\r" SHELL_PROMPT "%s\x1b[K", partial);
+
+    if (n > 0)
+    {
+        if (n > (int)sizeof(uart_line) - 1)
+        {
+            n = (int)sizeof(uart_line) - 1;
+        }
+        uart_write_bytes(SHELL_UART_NUM, uart_line, (size_t)n);
+    }
+
+    snprintf(lcd_line, sizeof(lcd_line), SHELL_PROMPT "%s", partial);
+
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    term_set_current_line_locked(lcd_line);
+    xSemaphoreGive(s_console.lock);
+}
+
+/**********************
+ *   shell 任务
+ **********************/
+static void shell_task(void *arg)
+{
+    (void)arg;
+
+    char line[SHELL_LINE_MAX];
+    size_t len = 0;
+    int esc = 0;            /* 0: 无, 1: 收到ESC, 2: 转义序列中 */
+    bool last_cr = false;
+
+    app_shell_puts("\r\nESP32-P4 app_shell ready. Type 'help'.\r\n");
+    app_shell_puts(SHELL_PROMPT);
+
+    for (;;)
+    {
+        uint8_t ch;
+        int n = uart_read_bytes(SHELL_UART_NUM, &ch, 1, portMAX_DELAY);
+
+        if (n != 1)
+        {
+            continue;
+        }
+
+        /* 方向键: ESC [ A/B 或 ESC O A/B */
+        if (esc == 1)
+        {
+            esc = (ch == '[' || ch == 'O') ? 2 : 0;
+            continue;
+        }
+        if (esc == 2)
+        {
+            if (ch >= 0x40 && ch <= 0x7e)   /* 终止字节 */
+            {
+                esc = 0;
+                if (ch == 'A')              /* 上: 更早的历史 */
+                {
+                    if (s_console.hist_pos > 0)
+                    {
+                        s_console.hist_pos--;
+                        snprintf(line, sizeof(line), "%s", s_console.hist[s_console.hist_pos]);
+                        len = strlen(line);
+                        shell_redraw_line(line);
+                    }
+                }
+                else if (ch == 'B')         /* 下: 更新的历史 */
+                {
+                    if (s_console.hist_pos < s_console.hist_count)
+                    {
+                        s_console.hist_pos++;
+                        if (s_console.hist_pos == s_console.hist_count)
+                        {
+                            line[0] = 0;
+                        }
+                        else
+                        {
+                            snprintf(line, sizeof(line), "%s", s_console.hist[s_console.hist_pos]);
+                        }
+                        len = strlen(line);
+                        shell_redraw_line(line);
+                    }
+                }
+            }
+            continue;
+        }
+        if (ch == 0x1b)
+        {
+            esc = 1;
+            continue;
+        }
+
+        /* 回车: CRLF和单独LF都接受 */
+        if (ch == '\r' || ch == '\n')
+        {
+            if (ch == '\n' && last_cr)
+            {
+                last_cr = false;
+                continue;
+            }
+            last_cr = (ch == '\r');
+
+            app_shell_puts("\r\n");
+            line[len] = 0;
+            hist_push(line);
+            shell_exec(line);
+            len = 0;
+            s_console.hist_pos = s_console.hist_count;
+            app_shell_puts(SHELL_PROMPT);
+            continue;
+        }
+        last_cr = false;
+
+        /* 退格 */
+        if (ch == 0x7f || ch == 0x08)
+        {
+            if (len > 0)
+            {
+                len--;
+                app_shell_puts("\b \b");
+            }
+            continue;
+        }
+
+        /* Ctrl-C */
+        if (ch == 0x03)
+        {
+            len = 0;
+            s_console.hist_pos = s_console.hist_count;
+            app_shell_puts("^C\r\n" SHELL_PROMPT);
+            continue;
+        }
+
+        /* 可打印字符, 本地回显 */
+        if (ch >= 0x20 && ch < 0x7f && len < SHELL_LINE_MAX - 1)
+        {
+            line[len++] = (char)ch;
+            shell_write((const char *)&ch, 1);
+        }
+    }
+}
+
+/**********************
+ *   LVGL 界面
+ **********************/
+static void shell_home_btn_cb(lv_event_t *e)
+{
+    (void)e;
+
+    if (s_ui.home_screen != NULL)
+    {
+        lv_scr_load(s_ui.home_screen);
+    }
+}
+
+/* 创建LCD文本页(只在LVGL任务中调用) */
+static void app_shell_ui_create(void)
+{
+    if (s_ui.screen != NULL)
+    {
+        return;
+    }
+
+    s_ui.screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(s_ui.screen, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_ui.screen, LV_OPA_COVER, 0);
+
+    /* 顶栏: 标题 + HOME按钮 */
+    lv_obj_t *bar = lv_obj_create(s_ui.screen);
+    lv_obj_set_size(bar, LV_HOR_RES, SHELL_BAR_H);
+    lv_obj_set_pos(bar, 0, 0);
+    lv_obj_set_style_radius(bar, 0, 0);
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x1E1E1E), 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(bar);
+    lv_label_set_text(title, "SHELL  UART0 115200");
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 8, 0);
+
+    lv_obj_t *home = lv_btn_create(bar);
+    lv_obj_set_size(home, 64, SHELL_BAR_H - 8);
+    lv_obj_align(home, LV_ALIGN_RIGHT_MID, -4, 0);
+    lv_obj_add_event_cb(home, shell_home_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *home_label = lv_label_create(home);
+    lv_label_set_text(home_label, "HOME");
+    lv_obj_center(home_label);
+
+    /* 终端显示区 */
+    s_ui.term_cont = lv_obj_create(s_ui.screen);
+    lv_obj_set_size(s_ui.term_cont, LV_HOR_RES, LV_VER_RES - SHELL_BAR_H);
+    lv_obj_set_pos(s_ui.term_cont, 0, SHELL_BAR_H);
+    lv_obj_set_style_radius(s_ui.term_cont, 0, 0);
+    lv_obj_set_style_border_width(s_ui.term_cont, 0, 0);
+    lv_obj_set_style_bg_color(s_ui.term_cont, lv_color_black(), 0);
+    lv_obj_set_style_pad_all(s_ui.term_cont, 8, 0);
+    lv_obj_set_scroll_dir(s_ui.term_cont, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(s_ui.term_cont, LV_SCROLLBAR_MODE_AUTO);
+
+    s_ui.term_label = lv_label_create(s_ui.term_cont);
+    lv_obj_set_width(s_ui.term_label, LV_HOR_RES - 16);
+    lv_label_set_long_mode(s_ui.term_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(s_ui.term_label, lv_color_hex(0x33FF33), 0);
+    lv_obj_set_style_text_font(s_ui.term_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_ui.term_label, "");
+
+    ESP_LOGI(TAG, "LCD console created");
+}
+
+/**********************
+ *   GLOBAL FUNCTIONS
+ **********************/
+void app_shell_init(void)
+{
+    if (s_console.lock != NULL)
+    {
+        return;
+    }
+
+    s_console.lock = xSemaphoreCreateMutex();
+    configASSERT(s_console.lock != NULL);
+
+    const uart_config_t cfg =
+    {
+        .baud_rate = SHELL_UART_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    ESP_ERROR_CHECK(uart_param_config(SHELL_UART_NUM, &cfg));
+    ESP_ERROR_CHECK(uart_driver_install(SHELL_UART_NUM, 2048, 0, 0, NULL, 0));
+
+    xTaskCreate(shell_task, "app_shell", 4096, NULL, 3, NULL);
+    ESP_LOGI(TAG, "shell started on UART0, 115200");
+}
+
+/* 把RAM缓冲刷到LCD标签(只在LVGL任务中调用) */
+static void shell_label_refresh(void)
+{
+    bool dirty = false;
+
+    xSemaphoreTake(s_console.lock, portMAX_DELAY);
+    if (s_console.dirty)
+    {
+        memcpy(s_console.tick_buf, s_console.text, s_console.len + 1);
+        s_console.dirty = false;
+        dirty = true;
+    }
+    xSemaphoreGive(s_console.lock);
+
+    if (!dirty || s_ui.term_label == NULL)
+    {
+        return;
+    }
+
+    lv_label_set_text(s_ui.term_label, s_console.tick_buf);
+    lv_obj_update_layout(s_ui.term_cont);
+
+    /* 滚到最新一行 */
+    lv_coord_t y = lv_obj_get_height(s_ui.term_label) - lv_obj_get_content_height(s_ui.term_cont);
+    lv_obj_scroll_to_y(s_ui.term_cont, y > 0 ? y : 0, LV_ANIM_OFF);
+}
+
+void app_shell_tick(void)
+{
+    app_shell_ui_create();
+    shell_label_refresh();
+}
+
+void app_shell_open(void)
+{
+    app_shell_ui_create();
+
+    if (lv_scr_act() != s_ui.screen)
+    {
+        if (s_ui.home_screen == NULL)
+        {
+            s_ui.home_screen = lv_scr_act();
+        }
+
+        /* 每次进入页面都从干净的一行提示符开始, 不重复累积 */
+        shell_mirror_reset_to_prompt();
+        shell_label_refresh();
+
+        lv_scr_load(s_ui.screen);
+        lv_obj_invalidate(s_ui.screen);
+    }
+}

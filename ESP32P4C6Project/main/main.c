@@ -10,6 +10,7 @@
 #include "lv_port_disp.h"
 #include "lv_port_indev.h"
 #include "user_home.h"
+#include "app_shell.h"
 #include "wifi_manager.h"
 #include "ap_wifi.h"
 #include "onenet_mqtt.h"
@@ -149,6 +150,7 @@ static void lvgl_task(void *arg)
         }
 
         lv_timer_handler();
+        app_shell_tick();       /* 把串口shell输出刷到LCD文本页 */
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
@@ -169,6 +171,8 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    app_shell_init();           /* 串口命令行(UART0): help/hello/free/clear/reboot, 输出镜像到LCD */
 
     sd_card_test();             /* SD卡读写测试 */
 
