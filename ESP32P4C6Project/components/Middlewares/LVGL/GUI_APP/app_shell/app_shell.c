@@ -258,14 +258,21 @@ static void term_set_current_line_locked(const char *text)
     }
 }
 
-/* 重画输入行: UART用ANSI转义序列, LCD镜像整行替换 */
-static void shell_redraw_line(const char *partial)
+/* 重画输入行: UART用ANSI转义序列, LCD镜像整行替换; cursor 为光标在 text 中的位置 */
+static void shell_redraw_line(const char *text, size_t cursor)
 {
-    char uart_line[SHELL_LINE_MAX + 32];
+    char uart_line[SHELL_LINE_MAX + 48];
     char lcd_line[SHELL_LINE_MAX + 16];
-    int n = snprintf(uart_line, sizeof(uart_line),
-                     "\r" SHELL_PROMPT "%s\x1b[K", partial);
+    size_t tlen = strlen(text);
+    int n;
 
+    if (cursor > tlen)
+    {
+        cursor = tlen;
+    }
+
+    /* \r回到行首, 打印提示符和整行, \x1b[K 清掉行尾残留 */
+    n = snprintf(uart_line, sizeof(uart_line), "\r" SHELL_PROMPT "%s\x1b[K", text);
     if (n > 0)
     {
         if (n > (int)sizeof(uart_line) - 1)
@@ -273,12 +280,27 @@ static void shell_redraw_line(const char *partial)
             n = (int)sizeof(uart_line) - 1;
         }
         uart_write_bytes(SHELL_UART_NUM, uart_line, (size_t)n);
+
+        /* 光标不在行尾时左移到位 */
+        if (cursor < tlen)
+        {
+            n = snprintf(uart_line, sizeof(uart_line), "\x1b[%uD", (unsigned)(tlen - cursor));
+            if (n > 0)
+            {
+                if (n > (int)sizeof(uart_line) - 1)
+                {
+                    n = (int)sizeof(uart_line) - 1;
+                }
+                uart_write_bytes(SHELL_UART_NUM, uart_line, (size_t)n);
+            }
+        }
     }
 
-    snprintf(lcd_line, sizeof(lcd_line), SHELL_PROMPT "%s", partial);
+    snprintf(lcd_line, sizeof(lcd_line), SHELL_PROMPT "%s", text);
 
     xSemaphoreTake(s_console.lock, portMAX_DELAY);
     term_set_current_line_locked(lcd_line);
+    s_console.cursor_col = (int)(strlen(SHELL_PROMPT) + cursor);   /* 光标所在的显示列 */
     xSemaphoreGive(s_console.lock);
 }
 
@@ -291,8 +313,12 @@ static void shell_task(void *arg)
 
     char line[SHELL_LINE_MAX];
     size_t len = 0;
-    int esc = 0;            /* 0: 无, 1: 收到ESC, 2: 转义序列中 */
+    size_t cursor = 0;      /* 光标在 line 中的位置, 0..len */
+    shell_key_state_t key_state = WAIT_NORMAL;
     bool last_cr = false;
+
+    /* line 必须始终以'\0'结尾(插入/重画都依赖这个不变量), 任务栈初始内容不可信 */
+    line[0] = 0;
 
     app_shell_puts("\r\nESP32-P4 app_shell ready. Type 'help'.\r\n");
     app_shell_puts(SHELL_PROMPT);
@@ -300,57 +326,93 @@ static void shell_task(void *arg)
     for (;;)
     {
         uint8_t ch;
-        int n = uart_read_bytes(SHELL_UART_NUM, &ch, 1, portMAX_DELAY);
+        int n = uart_read_bytes(SHELL_UART_NUM, &ch, 1, pdMS_TO_TICKS(100));
 
         if (n != 1)
         {
+            /* 进入LCD文本页: 只在串口补打一次提示符, LCD已由shell_mirror_reset_to_prompt处理 */
+            if (s_console.prompt_req)
+            {
+                s_console.prompt_req = false;
+                if (len == 0)
+                {
+                    shell_raw("\r\n" SHELL_PROMPT);
+                }
+            }
             continue;
         }
 
-        /* 方向键: ESC [ A/B 或 ESC O A/B */
-        if (esc == 1)
+        s_console.prompt_req = false;
+
+        /* 方向键: ESC [ A/B/C/D, 也接受应用光标模式的 ESC O A/B */
+        if (key_state == WAIT_SPEC_KEY)
         {
-            esc = (ch == '[' || ch == 'O') ? 2 : 0;
-            continue;
-        }
-        if (esc == 2)
-        {
-            if (ch >= 0x40 && ch <= 0x7e)   /* 终止字节 */
+            if (ch == '[' || ch == 'O')
             {
-                esc = 0;
-                if (ch == 'A')              /* 上: 更早的历史 */
+                key_state = WAIT_FUNC_KEY;
+                continue;
+            }
+            /* 不是转义序列: 退回普通状态, 该字节按普通键继续处理 */
+            key_state = WAIT_NORMAL;
+        }
+        else if (key_state == WAIT_FUNC_KEY)
+        {
+            if (ch < 0x40 || ch > 0x7e)     /* 参数字节(如Delete键的'3'), 继续等终止字节 */
+            {
+                continue;
+            }
+            key_state = WAIT_NORMAL;
+
+            if (ch == 'A')                  /* 上: 更早的历史 */
+            {
+                if (s_console.hist_pos > 0)
                 {
-                    if (s_console.hist_pos > 0)
-                    {
-                        s_console.hist_pos--;
-                        snprintf(line, sizeof(line), "%s", s_console.hist[s_console.hist_pos]);
-                        len = strlen(line);
-                        shell_redraw_line(line);
-                    }
+                    s_console.hist_pos--;
+                    snprintf(line, sizeof(line), "%s", s_console.hist[s_console.hist_pos]);
+                    len = strlen(line);
+                    cursor = len;
+                    shell_redraw_line(line, cursor);
                 }
-                else if (ch == 'B')         /* 下: 更新的历史 */
+            }
+            else if (ch == 'B')             /* 下: 更新的历史 */
+            {
+                if (s_console.hist_pos < s_console.hist_count)
                 {
-                    if (s_console.hist_pos < s_console.hist_count)
+                    s_console.hist_pos++;
+                    if (s_console.hist_pos == s_console.hist_count)
                     {
-                        s_console.hist_pos++;
-                        if (s_console.hist_pos == s_console.hist_count)
-                        {
-                            line[0] = 0;
-                        }
-                        else
-                        {
-                            snprintf(line, sizeof(line), "%s", s_console.hist[s_console.hist_pos]);
-                        }
-                        len = strlen(line);
-                        shell_redraw_line(line);
+                        line[0] = 0;
                     }
+                    else
+                    {
+                        snprintf(line, sizeof(line), "%s", s_console.hist[s_console.hist_pos]);
+                    }
+                    len = strlen(line);
+                    cursor = len;
+                    shell_redraw_line(line, cursor);
+                }
+            }
+            else if (ch == 'C')             /* 右 */
+            {
+                if (cursor < len)
+                {
+                    cursor++;
+                    shell_redraw_line(line, cursor);
+                }
+            }
+            else if (ch == 'D')             /* 左 */
+            {
+                if (cursor > 0)
+                {
+                    cursor--;
+                    shell_redraw_line(line, cursor);
                 }
             }
             continue;
         }
         if (ch == 0x1b)
         {
-            esc = 1;
+            key_state = WAIT_SPEC_KEY;
             continue;
         }
 
@@ -369,19 +431,23 @@ static void shell_task(void *arg)
             hist_push(line);
             shell_exec(line);
             len = 0;
+            cursor = 0;
+            line[0] = 0;                /* 清掉旧命令, 否则下次插入会把它搬回来 */
             s_console.hist_pos = s_console.hist_count;
             app_shell_puts(SHELL_PROMPT);
             continue;
         }
         last_cr = false;
 
-        /* 退格 */
+        /* 退格: 删除光标前一个字符 */
         if (ch == 0x7f || ch == 0x08)
         {
-            if (len > 0)
+            if (cursor > 0)
             {
+                memmove(line + cursor - 1, line + cursor, len - cursor + 1);
                 len--;
-                app_shell_puts("\b \b");
+                cursor--;
+                shell_redraw_line(line, cursor);
             }
             continue;
         }
@@ -390,16 +456,29 @@ static void shell_task(void *arg)
         if (ch == 0x03)
         {
             len = 0;
+            cursor = 0;
+            line[0] = 0;
             s_console.hist_pos = s_console.hist_count;
             app_shell_puts("^C\r\n" SHELL_PROMPT);
             continue;
         }
 
-        /* 可打印字符, 本地回显 */
+        /* 可打印字符: 插入到光标处 */
         if (ch >= 0x20 && ch < 0x7f && len < SHELL_LINE_MAX - 1)
         {
-            line[len++] = (char)ch;
-            shell_write((const char *)&ch, 1);
+            memmove(line + cursor + 1, line + cursor, len - cursor + 1);
+            line[cursor] = (char)ch;
+            len++;
+            cursor++;
+
+            if (cursor == len)          /* 在行尾输入: 直接回显, 不必重画整行 */
+            {
+                shell_write((const char *)&ch, 1);
+            }
+            else
+            {
+                shell_redraw_line(line, cursor);
+            }
         }
     }
 }
@@ -471,6 +550,16 @@ static void app_shell_ui_create(void)
     lv_obj_set_style_text_font(s_ui.term_label, &lv_font_montserrat_12, 0);
     lv_label_set_text(s_ui.term_label, "");
 
+    /* 输入光标: 2px竖条, 作为label的子对象, 跟随文本一起滚动
+     * 位置由 shell_cursor_update() 用 lv_label_get_letter_pos() 计算 */
+    s_ui.cursor_obj = lv_obj_create(s_ui.term_label);
+    lv_obj_remove_style_all(s_ui.cursor_obj);
+    lv_obj_set_size(s_ui.cursor_obj, 2, lv_font_get_line_height(&lv_font_montserrat_12));
+    lv_obj_set_style_bg_color(s_ui.cursor_obj, lv_color_hex(0x33FF33), 0);
+    lv_obj_set_style_bg_opa(s_ui.cursor_obj, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_ui.cursor_obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_ui.cursor_obj, LV_OBJ_FLAG_SCROLLABLE);
+
     ESP_LOGI(TAG, "LCD console created");
 }
 
@@ -504,15 +593,74 @@ void app_shell_init(void)
     ESP_LOGI(TAG, "shell started on UART0, 115200");
 }
 
+/* 把光标竖条定位到输入行的当前光标处(只在LVGL任务中调用)
+ * col: 镜像文本中当前输入行的显示列(含提示符), 已在锁内快照 */
+static void shell_cursor_update(int col)
+{
+    const char *txt = s_console.tick_buf;
+    const char *nl;
+    size_t start;
+    size_t len;
+    size_t idx;
+    lv_point_t pos;
+
+    if (s_ui.cursor_obj == NULL)
+    {
+        return;
+    }
+
+    nl = strrchr(txt, '\n');
+    start = (nl != NULL) ? (size_t)(nl - txt) + 1 : 0;
+    len = strlen(txt);
+    idx = start + (size_t)col;
+    if (idx > len)
+    {
+        idx = len;
+    }
+
+    /* label文本坐标与子对象坐标同原点; 该函数内部会处理自动换行 */
+    lv_label_get_letter_pos(s_ui.term_label, (uint32_t)idx, &pos);
+    lv_obj_set_pos(s_ui.cursor_obj, pos.x, pos.y);
+}
+
+/* 光标闪烁(只在LVGL任务中调用) */
+static void shell_cursor_blink(void)
+{
+    bool on;
+
+    if (s_ui.cursor_obj == NULL)
+    {
+        return;
+    }
+
+    on = ((lv_tick_get() / SHELL_CURSOR_BLINK_MS) % 2) == 0;
+
+    if (on == !lv_obj_has_flag(s_ui.cursor_obj, LV_OBJ_FLAG_HIDDEN))
+    {
+        return;
+    }
+
+    if (on)
+    {
+        lv_obj_clear_flag(s_ui.cursor_obj, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
+        lv_obj_add_flag(s_ui.cursor_obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 /* 把RAM缓冲刷到LCD标签(只在LVGL任务中调用) */
 static void shell_label_refresh(void)
 {
     bool dirty = false;
+    int cursor_col = 0;
 
     xSemaphoreTake(s_console.lock, portMAX_DELAY);
     if (s_console.dirty)
     {
         memcpy(s_console.tick_buf, s_console.text, s_console.len + 1);
+        cursor_col = s_console.cursor_col;
         s_console.dirty = false;
         dirty = true;
     }
@@ -526,6 +674,8 @@ static void shell_label_refresh(void)
     lv_label_set_text(s_ui.term_label, s_console.tick_buf);
     lv_obj_update_layout(s_ui.term_cont);
 
+    shell_cursor_update(cursor_col);
+
     /* 滚到最新一行 */
     lv_coord_t y = lv_obj_get_height(s_ui.term_label) - lv_obj_get_content_height(s_ui.term_cont);
     lv_obj_scroll_to_y(s_ui.term_cont, y > 0 ? y : 0, LV_ANIM_OFF);
@@ -535,6 +685,7 @@ void app_shell_tick(void)
 {
     app_shell_ui_create();
     shell_label_refresh();
+    shell_cursor_blink();
 }
 
 void app_shell_open(void)
@@ -554,5 +705,8 @@ void app_shell_open(void)
 
         lv_scr_load(s_ui.screen);
         lv_obj_invalidate(s_ui.screen);
+
+        /* 让shell任务在串口也补打一行提示符, 与LCD上的一行对齐 */
+        s_console.prompt_req = true;
     }
 }

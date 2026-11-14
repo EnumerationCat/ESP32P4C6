@@ -33,9 +33,20 @@ extern "C" {
 /* LCD 顶栏高度 */
 #define SHELL_BAR_H          36
 
+/* LCD 输入光标闪烁周期(ms) */
+#define SHELL_CURSOR_BLINK_MS  500
+
 /**********************
  *      TYPEDEFS
  **********************/
+
+/* 按键解析状态: 方向键等转义序列是逐字节到达的, 需记住解析到第几个字节 */
+typedef enum
+{
+    WAIT_NORMAL = 0,        /* 普通状态, 字节按普通按键处理 */
+    WAIT_SPEC_KEY,          /* 已收到ESC, 等 '[' 或 'O' */
+    WAIT_FUNC_KEY,          /* 已确认序列前缀, 等 A/B/C/D 功能码 */
+} shell_key_state_t;
 
 /* 终端/命令行状态, shell任务与LVGL任务共享(text/len/dirty/cursor_col 受 lock 保护) */
 typedef struct
@@ -44,11 +55,12 @@ typedef struct
     char text[SHELL_BUF_SIZE + 1];             /* LCD镜像终端缓冲 */
     size_t len;                                /* text 当前长度 */
     bool dirty;                                /* 有新内容待刷到LCD */
-    int cursor_col;                            /* 当前输入行光标列(用于退格) */
+    int cursor_col;                            /* 当前输入行光标显示列(含提示符, 用于LCD光标定位) */
     char hist[SHELL_HIST_MAX][SHELL_LINE_MAX]; /* 命令历史 */
     int hist_count;                            /* 历史条数 */
     int hist_pos;                              /* 当前浏览位置(==hist_count表示新行) */
     char tick_buf[SHELL_BUF_SIZE + 1];         /* LVGL任务刷新时的拷贝缓冲 */
+    volatile bool prompt_req;                  /* 请求shell任务在串口补打一次提示符 */
 } shell_console_t;
 
 /* LCD界面对象, 只在LVGL任务中访问 */
@@ -57,7 +69,9 @@ typedef struct
     lv_obj_t *screen;                          /* LCD文本页 */
     lv_obj_t *term_cont;                       /* 可滚动终端区 */
     lv_obj_t *term_label;                      /* 文本标签 */
+    lv_obj_t *cursor_obj;                      /* 输入光标竖条(term_label的子对象) */
     lv_obj_t *home_screen;                     /* 进入shell前的屏幕 */
+	
 } shell_ui_t;
 
 /**********************
