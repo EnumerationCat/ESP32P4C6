@@ -17,6 +17,7 @@
 #include "shell_core.h"
 #include "shell_input_uart.h"
 #include "view.h"
+#include "page_manager.h"
 #include "container_of.h"
 #include "lvgl.h"
 
@@ -70,6 +71,7 @@ static shell_ui_t s_ui =
 {
     .base =
     {
+        .id        = SHELL_PAGE_ID,
         .name      = "shell",
         .init      = shell_init,
         .deinit    = shell_deinit,
@@ -345,15 +347,13 @@ static void shell_on_event(view_t *self, const char *event_id)
 
     if (strcmp(event_id, "home") == 0)
     {
-        if (self->on_pause != NULL)
-        {
-            self->on_pause(self);
-        }
-
+        /* 先切回主界面, 再关闭页面(关闭会删除shell屏幕, 不能删当前活动屏) */
         if (ui->home_screen != NULL)
         {
             lv_scr_load(ui->home_screen);
         }
+
+        page_close(self);       /* 交给页面管理器: on_stop + 恢复挂起页 */
     }
 }
 
@@ -361,22 +361,20 @@ static void shell_on_event(view_t *self, const char *event_id)
  *   GLOBAL FUNCTIONS
  **********************/
 
-/* 初始化: 创建数据层 -> 安装UART输入源 -> 启动shell任务 */
+/* 初始化: 创建数据层 -> 安装UART输入源 -> 启动shell任务 -> 注册到页面管理器 */
 void shell_page_init(void)
 {
     shell_core_init();
     shell_input_uart_init();
     shell_core_start();
-}
 
-void shell_page_tick(void)
-{
-    s_ui.base.on_update(&s_ui.base);
+    page_manager_init();
+    page_register(&s_ui.base);
 }
 
 void shell_page_open(void)
 {
-    s_ui.base.on_start(&s_ui.base);
+    page_open(&s_ui.base);
 }
 
 void shell_page_puts(const char *s)

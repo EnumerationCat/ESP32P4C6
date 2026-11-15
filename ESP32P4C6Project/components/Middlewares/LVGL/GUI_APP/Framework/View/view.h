@@ -14,7 +14,7 @@
  * typedef struct { view_t base; lv_obj_t *screen; } my_view_t;
  * static my_view_t s_my =
  * {
- *     .base = { .name = "my", .init = my_init, .on_update = my_update, },
+ *     .base = { .id = MY_PAGE_ID, .name = "my", .init = my_init, .on_update = my_update, },
  * };
  * static void my_init(view_t *self)
  * {
@@ -27,6 +27,10 @@
 #ifndef VIEW_H
 #define VIEW_H
 
+#include <stdint.h>
+
+#include "list_head.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -35,7 +39,9 @@ typedef struct view view_t;
 
 struct view
 {
-    const char *name;                                     /* 视图标识(路由/调试用), 建议用字符串常量 */
+    uint16_t id;                                          /* 页面ID(注册表主键, 0为无效) */
+    const char *name;                                     /* 页面名字(日志/调试用), 建议用字符串常量 */
+    list_head_t link;                                     /* 侵入式状态节点(由page_manager维护) */
 
     void (*init)(view_t *self);                           /* 创建资源/控件 */
     void (*deinit)(view_t *self);                         /* 释放资源/控件 */

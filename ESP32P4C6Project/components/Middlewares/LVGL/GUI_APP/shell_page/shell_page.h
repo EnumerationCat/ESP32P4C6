@@ -3,11 +3,12 @@
  * @brief 命令行页面(shell_page): 对外接口 + LCD文本页显示
  *
  * 页面 = 显示层(view) + 模块初始化接口:
- *  - init 创建数据层、安装UART0驱动并启动shell任务;
- *  - tick/open 由LVGL任务调用, 维护LCD文本页;
+ *  - init 创建数据层、安装UART0驱动、启动shell任务并注册到page_manager;
+ *  - open 由page_manager驱动, 进入页面时创建控件并刷新;
  *  - puts/printf/clear/input_push 供命令实现和输入源使用的model快捷接口。
  *
- * 依赖: Framework/shell_core(数据层)、Framework/Model/shell_input_uart(输入源)。
+ * 依赖: Framework/shell_core(数据层)、Framework/Model/shell_input_uart(输入源)、
+ *       Framework/Manage/page_manager(页面注册与切换)。
  */
 
 #ifndef SHELL_PAGE_H
@@ -18,6 +19,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**********************
+ *      DEFINES
+ **********************/
+#define SHELL_PAGE_ID   1       /* 页面ID(page_manager注册表主键) */
 
 /**********************
  * GLOBAL PROTOTYPES
@@ -32,16 +38,8 @@ extern "C" {
 void shell_page_init(void);
 
 /**
- * @brief       周期刷新LCD文本页(只在LVGL任务中调用)
- * @note        与 lv_timer_handler() 同一任务中周期调用
- * @param       无
- * @retval      无
- */
-void shell_page_tick(void);
-
-/**
  * @brief       切换到LCD文本页(只在LVGL任务中调用)
- * @note        进入时把终端文本重置为一行提示符, 并请求串口补打提示符
+ * @note        走 page_open, 由页面管理器处理挂起/启动; 刷新由 page_manager_tick 驱动
  * @param       无
  * @retval      无
  */

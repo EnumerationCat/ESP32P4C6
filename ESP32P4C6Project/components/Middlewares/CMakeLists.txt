@@ -288,6 +288,8 @@ set(src_dirs    wifi_manager/wifi_manager.c
 
 				LVGL/GUI_APP/user_home/user_home.c
 				LVGL/GUI_APP/shell_page/shell_page.c
+				LVGL/GUI_APP/Framework/Manage/list_head.c
+				LVGL/GUI_APP/Framework/Manage/page_manager.c
 				LVGL/GUI_APP/Framework/shell_core.c
 				LVGL/GUI_APP/Framework/command.c
 				LVGL/GUI_APP/Framework/Model/shell_input_uart.c

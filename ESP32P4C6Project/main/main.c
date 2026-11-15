@@ -12,6 +12,7 @@
 #include "lv_port_fs.h"
 #include "user_home.h"
 #include "shell_page.h"
+#include "page_manager.h"
 #include "wifi_manager.h"
 #include "ap_wifi.h"
 #include "onenet_mqtt.h"
@@ -100,7 +101,7 @@ static void lvgl_task(void *arg)
         }
 
         lv_timer_handler();
-        shell_page_tick();      /* 把串口shell输出刷到LCD文本页 */
+        page_manager_tick();    /* 只刷新当前可见页(把串口shell输出刷到LCD文本页) */
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
