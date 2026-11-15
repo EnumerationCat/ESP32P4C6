@@ -39,9 +39,6 @@ typedef struct
     bool mouse_iface;   /* 设备中已发现标准鼠标接口(用于非标准鼠标的兼容判断) */
 } usb_mouse_state_t;
 
-static usb_mouse_state_t s_state;
-static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
-
 /*
  * 很多2.4G接收器/复合设备不按boot报文(按键,x,y)上报, 而是带Report ID、
  * 字段顺序不同或有16位轴值(如小米接收器实际是 [ID, 按键, X, Y])。
@@ -83,13 +80,28 @@ typedef struct
     portMUX_TYPE lock;              /* 保护live区 */
 } hid_layout_db_t;
 
-static hid_layout_db_t s_layout_db = {
-    .lock = portMUX_INITIALIZER_UNLOCKED,
+/* 驱动全部模块级状态: USB回调、LVGL读取、布局任务共享 */
+typedef struct
+{
+    usb_mouse_state_t state;            /* 累计位移/按键/连接状态 */
+    portMUX_TYPE state_lock;            /* 保护state */
+
+    hid_layout_db_t layouts;            /* 报告描述符解析出的布局 */
+
+    QueueHandle_t layout_queue;         /* 接口启动任务队列 */
+    int debug_reports;                  /* 已打印的调试报文数 */
+} usb_hid_mouse_ctx_t;
+
+static usb_hid_mouse_ctx_t s_ctx = {
+    .state_lock = portMUX_INITIALIZER_UNLOCKED,
+    .layouts = {
+        .lock = portMUX_INITIALIZER_UNLOCKED,
+    },
 };
 
 static hid_mouse_layout_t *hid_parse_layout_get(uint8_t report_id)
 {
-    hid_layout_table_t *table = &s_layout_db.parse;
+    hid_layout_table_t *table = &s_ctx.layouts.parse;
 
     for (int i = 0; i < table->count; i++)
     {
@@ -110,6 +122,106 @@ static hid_mouse_layout_t *hid_parse_layout_get(uint8_t report_id)
     return layout;
 }
 
+/* 描述符解析过程中的Global/Local条目状态 */
+typedef struct
+{
+    uint32_t usage_page;            /* Global: Usage Page */
+    uint32_t report_size;           /* Global: Report Size */
+    uint32_t report_count;          /* Global: Report Count */
+    int32_t logical_min;            /* Global: Logical Minimum */
+    uint32_t bit_offset;            /* 当前报表内的比特偏移 */
+
+    uint32_t usages[HID_MAX_USAGES];        /* Local: 当前主条目之前声明的Usage */
+    uint32_t usage_pages[HID_MAX_USAGES];   /* 0: 沿用当前Usage Page */
+    size_t usage_count;
+    uint32_t usage_min;
+    uint32_t usage_max;
+    bool has_usage_range;
+
+    /* Push/Pop保存的Global状态 */
+    struct
+    {
+        uint32_t page;
+        uint32_t size;
+        uint32_t count;
+        int32_t min;
+    } stack[4];
+    int stack_depth;
+} hid_desc_ctx_t;
+
+/**
+ * @brief       处理Input主条目, 按当前Global/Local状态记录字段位置
+ * @param       ctx:解析上下文
+ * @param       layout:当前Report ID对应的布局
+ * @param       flags:Input主条目数据
+ * @retval      无
+ */
+static void hid_desc_handle_input(hid_desc_ctx_t *ctx, hid_mouse_layout_t *layout, uint32_t flags)
+{
+    /* HID规范: bit0=0表示Data, bit1=1表示Variable
+     * (0x02=Data,Var,Abs按键; 0x06=Data,Var,Rel轴; 0x03=常量填充) */
+    bool is_data = (flags & 0x01) == 0;
+    bool is_var = (flags & 0x02) != 0;
+
+    for (uint32_t n = 0; n < ctx->report_count; n++)
+    {
+        uint32_t usage = 0;
+        uint32_t page = ctx->usage_page;
+        bool have_usage = false;
+
+        if (n < ctx->usage_count)
+        {
+            usage = ctx->usages[n];
+            if (ctx->usage_pages[n] != 0)
+            {
+                page = ctx->usage_pages[n];
+            }
+            have_usage = true;
+        }
+        else if (ctx->has_usage_range && (ctx->usage_min + n) <= ctx->usage_max)
+        {
+            usage = ctx->usage_min + n;
+            have_usage = true;
+        }
+
+        if (is_data && is_var && have_usage)
+        {
+            /* 有的描述符在X/Y之前忘了切回Generic Desktop页,
+             * 这里除标准页外, 只要不是按键/消费类页面且位宽>=8也认作轴 */
+            bool axis_page = (page == 0x01) ||
+                             (page != 0x09 && page != 0x0C && ctx->report_size >= 8);
+
+            if (axis_page && usage == 0x30)           /* Generic Desktop X */
+            {
+                layout->x_bit = (uint16_t)ctx->bit_offset;
+                layout->x_size = (uint8_t)ctx->report_size;
+                layout->x_signed = (ctx->logical_min < 0);
+                layout->has_x = true;
+            }
+            else if (axis_page && usage == 0x31)      /* Generic Desktop Y */
+            {
+                layout->y_bit = (uint16_t)ctx->bit_offset;
+                layout->y_size = (uint8_t)ctx->report_size;
+                layout->y_signed = (ctx->logical_min < 0);
+                layout->has_y = true;
+            }
+            else if ((page == 0x09 || page == 0) && usage >= 1 && usage <= 8)   /* Button */
+            {
+                if (layout->buttons_num == 0)
+                {
+                    layout->buttons_bit = (uint16_t)ctx->bit_offset;
+                }
+                layout->buttons_num++;
+            }
+        }
+
+        ctx->bit_offset += ctx->report_size;
+    }
+
+    ctx->usage_count = 0;
+    ctx->has_usage_range = false;
+}
+
 /**
  * @brief       解析HID报告描述符, 提取X/Y/按键字段的比特位置
  * @param       desc:报告描述符
@@ -118,31 +230,11 @@ static hid_mouse_layout_t *hid_parse_layout_get(uint8_t report_id)
  */
 static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
 {
-    uint32_t usage_page = 0;
-    uint32_t report_size = 0;
-    uint32_t report_count = 0;
-    int32_t logical_min = 0;
-    uint32_t usages[HID_MAX_USAGES];
-    uint32_t usage_pages[HID_MAX_USAGES];       /* 0: 沿用当前Usage Page */
-    size_t usage_count = 0;
-    uint32_t usage_min = 0;
-    uint32_t usage_max = 0;
-    bool has_usage_range = false;
-    uint32_t bit_offset = 0;
+    hid_desc_ctx_t ctx = { 0 };
     hid_mouse_layout_t *layout;
 
-    /* Push/Pop保存的全局状态(部分描述符会用) */
-    struct
-    {
-        uint32_t page;
-        uint32_t size;
-        uint32_t count;
-        int32_t min;
-    } stack[4];
-    int stack_depth = 0;
-
-    s_layout_db.parse.count = 0;
-    s_layout_db.parse.has_report_id = false;
+    s_ctx.layouts.parse.count = 0;
+    s_ctx.layouts.parse.has_report_id = false;
 
     layout = hid_parse_layout_get(0);
     if (layout == NULL)
@@ -206,107 +298,46 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
         {
             if (tag == 0x8 && layout != NULL)   /* Input */
             {
-                /* HID规范: bit0=0表示Data, bit1=1表示Variable
-                 * (0x02=Data,Var,Abs按键; 0x06=Data,Var,Rel轴; 0x03=常量填充) */
-                bool is_data = (uval & 0x01) == 0;
-                bool is_var = (uval & 0x02) != 0;
-
-                for (uint32_t n = 0; n < report_count; n++)
-                {
-                    uint32_t usage = 0;
-                    uint32_t page = usage_page;
-                    bool have_usage = false;
-
-                    if (n < usage_count)
-                    {
-                        usage = usages[n];
-                        if (usage_pages[n] != 0)
-                        {
-                            page = usage_pages[n];
-                        }
-                        have_usage = true;
-                    }
-                    else if (has_usage_range && (usage_min + n) <= usage_max)
-                    {
-                        usage = usage_min + n;
-                        have_usage = true;
-                    }
-
-                    if (is_data && is_var && have_usage)
-                    {
-                        /* 有的描述符在X/Y之前忘了切回Generic Desktop页,
-                         * 这里除标准页外, 只要不是按键/消费类页面且位宽>=8也认作轴 */
-                        bool axis_page = (page == 0x01) ||
-                                         (page != 0x09 && page != 0x0C && report_size >= 8);
-
-                        if (axis_page && usage == 0x30)           /* Generic Desktop X */
-                        {
-                            layout->x_bit = (uint16_t)bit_offset;
-                            layout->x_size = (uint8_t)report_size;
-                            layout->x_signed = (logical_min < 0);
-                            layout->has_x = true;
-                        }
-                        else if (axis_page && usage == 0x31)      /* Generic Desktop Y */
-                        {
-                            layout->y_bit = (uint16_t)bit_offset;
-                            layout->y_size = (uint8_t)report_size;
-                            layout->y_signed = (logical_min < 0);
-                            layout->has_y = true;
-                        }
-                        else if ((page == 0x09 || page == 0) && usage >= 1 && usage <= 8)   /* Button */
-                        {
-                            if (layout->buttons_num == 0)
-                            {
-                                layout->buttons_bit = (uint16_t)bit_offset;
-                            }
-                            layout->buttons_num++;
-                        }
-                    }
-
-                    bit_offset += report_size;
-                }
-
-                usage_count = 0;
-                has_usage_range = false;
+                hid_desc_handle_input(&ctx, layout, uval);
             }
             else
             {
                 /* Collection/Output/Feature/End Collection: 只清局部条目 */
-                usage_count = 0;
-                has_usage_range = false;
+                ctx.usage_count = 0;
+                ctx.has_usage_range = false;
             }
         }
         else if (type == 0x01)              /* Global */
         {
             switch (tag)
             {
-                case 0x0: usage_page = uval; break;
-                case 0x1: logical_min = ival; break;
-                case 0x7: report_size = uval; break;
+                case 0x0: ctx.usage_page = uval; break;
+                case 0x1: ctx.logical_min = ival; break;
+                case 0x7: ctx.report_size = uval; break;
                 case 0x8:               /* Report ID: 每种ID的报表单独编号 */
-                    s_layout_db.parse.has_report_id = true;
+                    s_ctx.layouts.parse.has_report_id = true;
                     layout = hid_parse_layout_get((uint8_t)uval);
-                    bit_offset = 0;
+                    ctx.bit_offset = 0;
                     break;
-                case 0x9: report_count = uval; break;
+                case 0x9: ctx.report_count = uval; break;
                 case 0xA:               /* Push */
-                    if (stack_depth < (int)(sizeof(stack) / sizeof(stack[0])))
+                    if (ctx.stack_depth < (int)(sizeof(ctx.stack) / sizeof(ctx.stack[0])))
                     {
-                        stack[stack_depth].page = usage_page;
-                        stack[stack_depth].size = report_size;
-                        stack[stack_depth].count = report_count;
-                        stack[stack_depth].min = logical_min;
-                        stack_depth++;
+                        ctx.stack[ctx.stack_depth].page = ctx.usage_page;
+                        ctx.stack[ctx.stack_depth].size = ctx.report_size;
+                        ctx.stack[ctx.stack_depth].count = ctx.report_count;
+                        ctx.stack[ctx.stack_depth].min = ctx.logical_min;
+                        ctx.stack_depth++;
                     }
                     break;
                 case 0xB:               /* Pop */
-                    if (stack_depth > 0)
+                    if (ctx.stack_depth > 0)
                     {
-                        stack_depth--;
-                        usage_page = stack[stack_depth].page;
-                        report_size = stack[stack_depth].size;
-                        report_count = stack[stack_depth].count;
-                        logical_min = stack[stack_depth].min;
+                        ctx.stack_depth--;
+                        ctx.usage_page = ctx.stack[ctx.stack_depth].page;
+                        ctx.report_size = ctx.stack[ctx.stack_depth].size;
+                        ctx.report_count = ctx.stack[ctx.stack_depth].count;
+                        ctx.logical_min = ctx.stack[ctx.stack_depth].min;
                     }
                     break;
                 default: break;
@@ -317,7 +348,7 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
             switch (tag)
             {
                 case 0x0:
-                    if (usage_count < HID_MAX_USAGES)
+                    if (ctx.usage_count < HID_MAX_USAGES)
                     {
                         uint32_t usage = uval;
                         uint32_t page = 0;
@@ -329,18 +360,18 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
                             usage = uval & 0xFFFF;
                         }
 
-                        usages[usage_count] = usage;
-                        usage_pages[usage_count] = page;
-                        usage_count++;
+                        ctx.usages[ctx.usage_count] = usage;
+                        ctx.usage_pages[ctx.usage_count] = page;
+                        ctx.usage_count++;
                     }
                     break;
                 case 0x1:
-                    usage_min = (data_size == 4) ? (uval & 0xFFFF) : uval;
-                    has_usage_range = true;
+                    ctx.usage_min = (data_size == 4) ? (uval & 0xFFFF) : uval;
+                    ctx.has_usage_range = true;
                     break;
                 case 0x2:
-                    usage_max = (data_size == 4) ? (uval & 0xFFFF) : uval;
-                    has_usage_range = true;
+                    ctx.usage_max = (data_size == 4) ? (uval & 0xFFFF) : uval;
+                    ctx.has_usage_range = true;
                     break;
                 default: break;
             }
@@ -348,7 +379,7 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
     }
 
     /* 丢弃没有同时找到X/Y的布局(如键盘接口的描述符) */
-    hid_layout_table_t *parse = &s_layout_db.parse;
+    hid_layout_table_t *parse = &s_ctx.layouts.parse;
     int kept = 0;
 
     for (int i = 0; i < parse->count; i++)
@@ -365,9 +396,9 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
         return false;       /* 保留原有的有效布局 */
     }
 
-    portENTER_CRITICAL(&s_layout_db.lock);
-    s_layout_db.live = *parse;
-    portEXIT_CRITICAL(&s_layout_db.lock);
+    portENTER_CRITICAL(&s_ctx.layouts.lock);
+    s_ctx.layouts.live = *parse;
+    portEXIT_CRITICAL(&s_ctx.layouts.lock);
 
     return true;
 }
@@ -454,8 +485,8 @@ static bool hid_find_layout(const uint8_t *data, int length, hid_mouse_layout_t 
 {
     bool found = false;
 
-    portENTER_CRITICAL(&s_layout_db.lock);
-    const hid_layout_table_t *table = &s_layout_db.live;
+    portENTER_CRITICAL(&s_ctx.layouts.lock);
+    const hid_layout_table_t *table = &s_ctx.layouts.live;
 
     if (table->count > 0)
     {
@@ -484,7 +515,7 @@ static bool hid_find_layout(const uint8_t *data, int length, hid_mouse_layout_t 
             found = true;
         }
     }
-    portEXIT_CRITICAL(&s_layout_db.lock);
+    portEXIT_CRITICAL(&s_ctx.layouts.lock);
 
     /* 报文太短(如键盘接口的报文)时不解析, 避免误判成鼠标位移 */
     if (found && *body_len < hid_layout_min_bytes(out))
@@ -512,8 +543,7 @@ static void hid_host_mouse_report_callback(const uint8_t *const data, const int 
     bool have_layout = hid_find_layout(data, length, &layout, &body, &body_len);
 
     /* 调试: 打印前几次原始报文, 便于确认设备实际格式 */
-    static int s_dbg_reports = 0;
-    if (s_dbg_reports < 5)
+    if (s_ctx.debug_reports < 5)
     {
         char hex[3 * 12 + 1] = { 0 };
         int n = length < 12 ? length : 12;
@@ -522,7 +552,7 @@ static void hid_host_mouse_report_callback(const uint8_t *const data, const int 
             snprintf(hex + i * 3, sizeof(hex) - i * 3, "%02X ", data[i]);
         }
         ESP_LOGD(TAG, "report len=%d: %s", length, hex);
-        s_dbg_reports++;
+        s_ctx.debug_reports++;
     }
 
     if (have_layout)
@@ -549,12 +579,12 @@ static void hid_host_mouse_report_callback(const uint8_t *const data, const int 
         return;
     }
 
-    portENTER_CRITICAL(&s_state_lock);
-    s_state.dx += dx;
-    s_state.dy += dy;
-    s_state.buttons = (uint8_t)buttons;
-    s_state.pending = true;
-    portEXIT_CRITICAL(&s_state_lock);
+    portENTER_CRITICAL(&s_ctx.state_lock);
+    s_ctx.state.dx += dx;
+    s_ctx.state.dy += dy;
+    s_ctx.state.buttons = (uint8_t)buttons;
+    s_ctx.state.pending = true;
+    portEXIT_CRITICAL(&s_ctx.state_lock);
 }
 
 /**
@@ -592,7 +622,7 @@ static bool hid_load_mouse_layout(hid_host_device_handle_t hid_device_handle)
     }
 
     /* 解析成功后parse已整体提交到live, 内容相同; parse只在本任务中访问 */
-    const hid_layout_table_t *table = &s_layout_db.parse;
+    const hid_layout_table_t *table = &s_ctx.layouts.parse;
 
     for (int i = 0; i < table->count; i++)
     {
@@ -615,8 +645,6 @@ typedef struct
     bool load_layout;
 } hid_layout_job_t;
 
-static QueueHandle_t s_layout_queue;
-
 /**
  * @brief       接口启动任务
  * @note        hid_host_get_report_descriptor() 是同步控制传输, 其完成回调由
@@ -634,7 +662,7 @@ static void hid_layout_task(void *arg)
 
     while (1)
     {
-        if (xQueueReceive(s_layout_queue, &job, portMAX_DELAY) != pdTRUE)
+        if (xQueueReceive(s_ctx.layout_queue, &job, portMAX_DELAY) != pdTRUE)
         {
             continue;
         }
@@ -655,9 +683,9 @@ static void hid_layout_task(void *arg)
             continue;
         }
 
-        portENTER_CRITICAL(&s_state_lock);
-        s_state.connected = true;
-        portEXIT_CRITICAL(&s_state_lock);
+        portENTER_CRITICAL(&s_ctx.state_lock);
+        s_ctx.state.connected = true;
+        portEXIT_CRITICAL(&s_ctx.state_lock);
     }
 }
 
@@ -694,9 +722,9 @@ static void hid_host_interface_callback(hid_host_device_handle_t hid_device_hand
                 break;
             }
 
-            portENTER_CRITICAL(&s_state_lock);
-            bool has_mouse_iface = s_state.mouse_iface;
-            portEXIT_CRITICAL(&s_state_lock);
+            portENTER_CRITICAL(&s_ctx.state_lock);
+            bool has_mouse_iface = s_ctx.state.mouse_iface;
+            portEXIT_CRITICAL(&s_ctx.state_lock);
 
             if (HID_PROTOCOL_MOUSE == dev_params.proto)
             {
@@ -708,9 +736,9 @@ static void hid_host_interface_callback(hid_host_device_handle_t hid_device_hand
                  * 复合设备(鼠标+键盘+厂商接口)里若已有鼠标接口, 忽略其它接口,
                  * 避免键盘/媒体键报文被误当作鼠标位移。
                  * 解析器会按报文长度/Report ID过滤, 不匹配的报文直接丢弃 */
-                portENTER_CRITICAL(&s_state_lock);
-                s_state.connected = true;
-                portEXIT_CRITICAL(&s_state_lock);
+                portENTER_CRITICAL(&s_ctx.state_lock);
+                s_ctx.state.connected = true;
+                portEXIT_CRITICAL(&s_ctx.state_lock);
                 hid_host_mouse_report_callback(data, (int)data_length);
             }
             else
@@ -723,21 +751,21 @@ static void hid_host_interface_callback(hid_host_device_handle_t hid_device_hand
         case HID_HOST_INTERFACE_EVENT_DISCONNECTED:
             ESP_LOGI(TAG, "HID device (%s) disconnected", hid_proto_name_str[dev_params.proto]);
 
-            portENTER_CRITICAL(&s_state_lock);
+            portENTER_CRITICAL(&s_ctx.state_lock);
             /* 只在本接口就是鼠标(或鼠标兼容接口)时清状态;
              * 复合设备的键盘/厂商接口断开不影响鼠标 */
             bool own_mouse = (HID_PROTOCOL_MOUSE == dev_params.proto);
-            bool fallback = (HID_PROTOCOL_NONE == dev_params.proto && !s_state.mouse_iface);
+            bool fallback = (HID_PROTOCOL_NONE == dev_params.proto && !s_ctx.state.mouse_iface);
             if (own_mouse || fallback)
             {
-                s_state.connected = false;
-                s_state.pending = false;
-                s_state.dx = 0;
-                s_state.dy = 0;
-                s_state.buttons = 0;
-                s_state.mouse_iface = false;
+                s_ctx.state.connected = false;
+                s_ctx.state.pending = false;
+                s_ctx.state.dx = 0;
+                s_ctx.state.dy = 0;
+                s_ctx.state.buttons = 0;
+                s_ctx.state.mouse_iface = false;
             }
-            portEXIT_CRITICAL(&s_state_lock);
+            portEXIT_CRITICAL(&s_ctx.state_lock);
 
             if (hid_host_device_close(hid_device_handle) != ESP_OK)
             {
@@ -798,17 +826,17 @@ static void hid_host_device_callback(hid_host_device_handle_t hid_device_handle,
      * 会超时5秒(例程里还会因ESP_ERROR_CHECK直接复位), 并阻塞后续接口枚举。
      * 改为解析报告描述符, 按实际的字段布局解析报文。
      */
-    portENTER_CRITICAL(&s_state_lock);
-    bool has_mouse_iface = s_state.mouse_iface;
-    portEXIT_CRITICAL(&s_state_lock);
+    portENTER_CRITICAL(&s_ctx.state_lock);
+    bool has_mouse_iface = s_ctx.state.mouse_iface;
+    portEXIT_CRITICAL(&s_ctx.state_lock);
 
     bool load_layout = false;
 
     if (HID_PROTOCOL_MOUSE == dev_params.proto)
     {
-        portENTER_CRITICAL(&s_state_lock);
-        s_state.mouse_iface = true;
-        portEXIT_CRITICAL(&s_state_lock);
+        portENTER_CRITICAL(&s_ctx.state_lock);
+        s_ctx.state.mouse_iface = true;
+        portEXIT_CRITICAL(&s_ctx.state_lock);
         load_layout = true;
     }
     else if (HID_PROTOCOL_NONE == dev_params.proto && !has_mouse_iface)
@@ -823,7 +851,7 @@ static void hid_host_device_callback(hid_host_device_handle_t hid_device_handle,
         .load_layout = load_layout,
     };
 
-    if (xQueueSend(s_layout_queue, &job, pdMS_TO_TICKS(100)) != pdTRUE)
+    if (xQueueSend(s_ctx.layout_queue, &job, pdMS_TO_TICKS(100)) != pdTRUE)
     {
         ESP_LOGW(TAG, "layout queue full, start without descriptor");
         if (hid_host_device_start(hid_device_handle) != ESP_OK)
@@ -896,8 +924,8 @@ esp_err_t usb_hid_mouse_init(void)
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
 
     /* 启动任务: 取报告描述符 + 启动接口(不能在HID回调任务里做) */
-    s_layout_queue = xQueueCreate(8, sizeof(hid_layout_job_t));
-    if (s_layout_queue == NULL)
+    s_ctx.layout_queue = xQueueCreate(8, sizeof(hid_layout_job_t));
+    if (s_ctx.layout_queue == NULL)
     {
         ESP_LOGE(TAG, "create layout queue failed");
         return ESP_ERR_NO_MEM;
@@ -939,28 +967,28 @@ bool usb_hid_mouse_read(usb_hid_mouse_report_t *report)
 
     bool pending;
 
-    portENTER_CRITICAL(&s_state_lock);
-    pending = s_state.pending;
+    portENTER_CRITICAL(&s_ctx.state_lock);
+    pending = s_ctx.state.pending;
     if (pending)
     {
-        report->x = s_state.dx;
-        report->y = s_state.dy;
-        report->buttons = s_state.buttons;
+        report->x = s_ctx.state.dx;
+        report->y = s_ctx.state.dy;
+        report->buttons = s_ctx.state.buttons;
 
-        s_state.dx = 0;
-        s_state.dy = 0;
-        s_state.pending = false;
+        s_ctx.state.dx = 0;
+        s_ctx.state.dy = 0;
+        s_ctx.state.pending = false;
     }
-    portEXIT_CRITICAL(&s_state_lock);
+    portEXIT_CRITICAL(&s_ctx.state_lock);
 
     return pending;
 }
 
 bool usb_hid_mouse_connected(void)
 {
-    portENTER_CRITICAL(&s_state_lock);
-    bool connected = s_state.connected;
-    portEXIT_CRITICAL(&s_state_lock);
+    portENTER_CRITICAL(&s_ctx.state_lock);
+    bool connected = s_ctx.state.connected;
+    portEXIT_CRITICAL(&s_ctx.state_lock);
 
     return connected;
 }
