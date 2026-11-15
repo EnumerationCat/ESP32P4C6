@@ -60,6 +60,7 @@ static void shell_init(view_t *self);
 static void shell_deinit(view_t *self);
 static void shell_on_start(view_t *self);
 static void shell_on_pause(view_t *self);
+static void shell_on_resume(view_t *self);
 static void shell_on_update(view_t *self);
 static void shell_on_stop(view_t *self);
 static void shell_on_event(view_t *self, const char *event_id);
@@ -77,6 +78,7 @@ static shell_ui_t s_ui =
         .deinit    = shell_deinit,
         .on_start  = shell_on_start,
         .on_pause  = shell_on_pause,
+        .on_resume = shell_on_resume,
         .on_update = shell_on_update,
         .on_stop   = shell_on_stop,
         .on_event  = shell_on_event,
@@ -318,6 +320,18 @@ static void shell_on_pause(view_t *self)
     (void)self;
 
     /* 页面隐藏后控件不再绘制, 光标闪烁无需额外处理 */
+}
+
+/* 从挂起恢复: 资源还在, 只需重新载入本页屏幕 */
+static void shell_on_resume(view_t *self)
+{
+    shell_ui_t *ui = shell_ui(self);
+
+    if (ui->screen != NULL)
+    {
+        lv_scr_load(ui->screen);
+        lv_obj_invalidate(ui->screen);
+    }
 }
 
 /* 周期刷新 */

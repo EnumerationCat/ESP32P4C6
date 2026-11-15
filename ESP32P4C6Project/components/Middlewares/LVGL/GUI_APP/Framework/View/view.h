@@ -46,7 +46,8 @@ struct view
     void (*init)(view_t *self);                           /* 创建资源/控件 */
     void (*deinit)(view_t *self);                         /* 释放资源/控件 */
     void (*on_start)(view_t *self);                       /* 进入视图(获得焦点) */
-    void (*on_pause)(view_t *self);                       /* 离开视图(失去焦点) */
+    void (*on_pause)(view_t *self);                       /* 离开视图(失去焦点, 资源保留) */
+    void (*on_resume)(view_t *self);                      /* 从挂起恢复(重新获得焦点, 资源仍在) */
     void (*on_update)(view_t *self);                      /* 周期刷新 */
     void (*on_stop)(view_t *self);                        /* 停止视图 */
     void (*on_event)(view_t *self, const char *event_id); /* 事件分发(字符串ID) */

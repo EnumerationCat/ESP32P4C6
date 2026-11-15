@@ -31,6 +31,21 @@ extern "C" {
 
 #define PAGE_REGISTRY_MAX   16      /* 注册表容量 */
 
+/* 页面管理器(全局唯一实例g_page_manager) */
+typedef struct
+{
+    bool inited;                            /* 三条链表是否已初始化 */
+    list_t ready;                           /* 可见页面(栈) */
+    list_t paused;                          /* 挂起页面(栈) */
+    list_t popup;                           /* 弹窗(按优先级升序) */
+
+    view_t *registry[PAGE_REGISTRY_MAX];    /* 全部页面(按ID查找) */
+    uint16_t reg_count;
+} page_manager_t;
+
+/* 全局唯一的页面管理器实例(定义在page_manager.c) */
+extern page_manager_t g_page_manager;
+
 /**
  * @brief       初始化管理器(可重复调用)
  * @param       无
@@ -75,6 +90,15 @@ void page_close(view_t *view);
  * @retval      无
  */
 void page_back(void);
+
+/**
+ * @brief       切换到指定ID的页面(go page)
+ * @note        只能在LVGL任务中调用; 切换前会关闭所有弹窗;
+ *              目标页若在挂起栈中会被提到前台
+ * @param       id: 页面ID
+ * @retval      true:切换成功(含已在目标页); false:ID未注册或状态异常
+ */
+bool manager_gopage(uint16_t id);
 
 /**
  * @brief       打开弹窗(带优先级, 数值越大越靠上)

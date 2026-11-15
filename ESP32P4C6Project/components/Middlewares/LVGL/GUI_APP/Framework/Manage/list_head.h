@@ -2,11 +2,7 @@
  * @file list_head.h
  * @brief 侵入式双向循环链表(intrusive list, Linux list_head 风格增强版)
  *
- * 文件/保护宏使用 list_head 命名, 避免和FreeRTOS的 freertos/list.h + LIST_H 冲突
- * (freertos/task.h 会间接包含它, 同名保护宏会让本文件被整体跳过)。
- *
  * 与内核list_head的区别: 本实现的"链表"自带len和哨兵头节点, 节点多一个owner字段。
- *
  * 节点内嵌在宿主结构体里, 链表本身不分配内存:
  *   struct xxx { list_head_t link; ... };
  *   xxx_t *x = container_of(node, xxx_t, link);
