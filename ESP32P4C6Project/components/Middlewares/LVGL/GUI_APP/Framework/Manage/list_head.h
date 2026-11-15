@@ -73,7 +73,7 @@ void list_add_sorted(list_t *list, list_head_t *node);
  * @param       node: 节点
  * @retval      无
  */
-void list_del(list_head_t *node);
+void list_delete(list_head_t *node);
 
 bool list_empty(const list_t *list);
 uint32_t list_len(const list_t *list);

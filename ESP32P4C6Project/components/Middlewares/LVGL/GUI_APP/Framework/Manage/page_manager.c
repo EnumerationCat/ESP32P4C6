@@ -52,7 +52,7 @@ static void suspend_top_page(page_manager_t *pm)
         top->on_pause(top);
     }
 
-    list_del(&top->link);
+    list_delete(&top->link);
     list_add_tail(&pm->paused, &top->link);
 }
 
@@ -90,7 +90,7 @@ static void resume_top_page(page_manager_t *pm)
         return;
     }
 
-    list_del(&top->link);
+    list_delete(&top->link);
 
     if (top->on_resume != NULL)
     {
@@ -188,7 +188,7 @@ void page_close(view_t *view)
         view->on_stop(view);
     }
 
-    list_del(&view->link);
+    list_delete(&view->link);
 
     /* 弹窗还在时由 popup_close 负责恢复底层页 */
     if (list_empty(&pm->popup))
@@ -245,7 +245,7 @@ bool manager_gopage(uint16_t id)
     /* 目标页在挂起栈里: 先摘出来, 走恢复流程(on_resume) */
     if (view->link.owner == &pm->paused)
     {
-        list_del(&view->link);
+        list_delete(&view->link);
         enter_page(pm, view, true);
         return true;
     }
@@ -298,7 +298,7 @@ void page_popup_close(view_t *view)
         view->on_stop(view);
     }
 
-    list_del(&view->link);
+    list_delete(&view->link);
 
     if (list_empty(&pm->popup))
     {

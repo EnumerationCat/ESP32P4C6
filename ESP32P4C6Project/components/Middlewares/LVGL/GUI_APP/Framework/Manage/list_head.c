@@ -71,7 +71,7 @@ void list_add_sorted(list_t *list, list_head_t *node)
     list->len++;
 }
 
-void list_del(list_head_t *node)
+void list_delete(list_head_t *node)
 {
     list_t *list = node->owner;
 
