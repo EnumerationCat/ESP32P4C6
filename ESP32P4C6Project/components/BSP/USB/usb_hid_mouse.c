@@ -1,9 +1,7 @@
 /**
  * @file usb_hid_mouse.c
- * @brief USB HID 鼠标驱动(移植自慧勤智远 28_usb_hid_mouse 例程)
- *
- * 与例程的区别: 不再通过消息队列把数据交给 app_main 用LCD画字符,
- * 而是把最新位移/按键保存在加锁的共享状态里, 由LVGL输入设备轮询读取。
+ * @brief USB HID 鼠标驱动
+ * 把最新位移/按键保存在加锁的共享状态里, 由LVGL输入设备轮询读取。
  */
 
 #include "usb_hid_mouse.h"
@@ -68,33 +66,45 @@ typedef struct
     bool y_signed;
 } hid_mouse_layout_t;
 
-static hid_mouse_layout_t s_layouts[HID_MAX_LAYOUTS];   /* 当前生效的布局 */
-static int s_layout_count;
-static bool s_has_report_id;
-static portMUX_TYPE s_layout_lock = portMUX_INITIALIZER_UNLOCKED;
+/* 一套报表布局表: 同一描述符内不同Report ID的字段位置 */
+typedef struct
+{
+    hid_mouse_layout_t items[HID_MAX_LAYOUTS];
+    int count;
+    bool has_report_id;
+} hid_layout_table_t;
 
-/* 解析时先写入临时数组, 只有在描述符里找到X/Y时才覆盖生效布局,
+/* 布局数据库: 解析时先写到parse, 只有找到X/Y才整体提交到live,
  * 避免键盘/厂商接口的描述符把已解析好的鼠标布局清掉 */
-static hid_mouse_layout_t s_parse_layouts[HID_MAX_LAYOUTS];
-static int s_parse_count;
-static bool s_parse_has_id;
+typedef struct
+{
+    hid_layout_table_t live;        /* 当前生效的布局 */
+    hid_layout_table_t parse;       /* 解析临时区 */
+    portMUX_TYPE lock;              /* 保护live区 */
+} hid_layout_db_t;
+
+static hid_layout_db_t s_layout_db = {
+    .lock = portMUX_INITIALIZER_UNLOCKED,
+};
 
 static hid_mouse_layout_t *hid_parse_layout_get(uint8_t report_id)
 {
-    for (int i = 0; i < s_parse_count; i++)
+    hid_layout_table_t *table = &s_layout_db.parse;
+
+    for (int i = 0; i < table->count; i++)
     {
-        if (s_parse_layouts[i].report_id == report_id)
+        if (table->items[i].report_id == report_id)
         {
-            return &s_parse_layouts[i];
+            return &table->items[i];
         }
     }
 
-    if (s_parse_count >= HID_MAX_LAYOUTS)
+    if (table->count >= HID_MAX_LAYOUTS)
     {
         return NULL;
     }
 
-    hid_mouse_layout_t *layout = &s_parse_layouts[s_parse_count++];
+    hid_mouse_layout_t *layout = &table->items[table->count++];
     memset(layout, 0, sizeof(*layout));
     layout->report_id = report_id;
     return layout;
@@ -131,8 +141,8 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
     } stack[4];
     int stack_depth = 0;
 
-    s_parse_count = 0;
-    s_parse_has_id = false;
+    s_layout_db.parse.count = 0;
+    s_layout_db.parse.has_report_id = false;
 
     layout = hid_parse_layout_get(0);
     if (layout == NULL)
@@ -274,7 +284,7 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
                 case 0x1: logical_min = ival; break;
                 case 0x7: report_size = uval; break;
                 case 0x8:               /* Report ID: 每种ID的报表单独编号 */
-                    s_parse_has_id = true;
+                    s_layout_db.parse.has_report_id = true;
                     layout = hid_parse_layout_get((uint8_t)uval);
                     bit_offset = 0;
                     break;
@@ -338,26 +348,26 @@ static bool hid_parse_report_descriptor(const uint8_t *desc, size_t len)
     }
 
     /* 丢弃没有同时找到X/Y的布局(如键盘接口的描述符) */
+    hid_layout_table_t *parse = &s_layout_db.parse;
     int kept = 0;
-    for (int i = 0; i < s_parse_count; i++)
+
+    for (int i = 0; i < parse->count; i++)
     {
-        if (s_parse_layouts[i].has_x && s_parse_layouts[i].has_y)
+        if (parse->items[i].has_x && parse->items[i].has_y)
         {
-            s_parse_layouts[kept++] = s_parse_layouts[i];
+            parse->items[kept++] = parse->items[i];
         }
     }
-    s_parse_count = kept;
+    parse->count = kept;
 
-    if (s_parse_count == 0)
+    if (parse->count == 0)
     {
         return false;       /* 保留原有的有效布局 */
     }
 
-    portENTER_CRITICAL(&s_layout_lock);
-    memcpy(s_layouts, s_parse_layouts, sizeof(s_layouts));
-    s_layout_count = s_parse_count;
-    s_has_report_id = s_parse_has_id;
-    portEXIT_CRITICAL(&s_layout_lock);
+    portENTER_CRITICAL(&s_layout_db.lock);
+    s_layout_db.live = *parse;
+    portEXIT_CRITICAL(&s_layout_db.lock);
 
     return true;
 }
@@ -443,24 +453,21 @@ static bool hid_find_layout(const uint8_t *data, int length, hid_mouse_layout_t 
                             const uint8_t **body, int *body_len)
 {
     bool found = false;
-    bool has_id;
-    int count;
 
-    portENTER_CRITICAL(&s_layout_lock);
-    has_id = s_has_report_id;
-    count = s_layout_count;
+    portENTER_CRITICAL(&s_layout_db.lock);
+    const hid_layout_table_t *table = &s_layout_db.live;
 
-    if (count > 0)
+    if (table->count > 0)
     {
-        if (has_id)
+        if (table->has_report_id)
         {
             if (length >= 1)
             {
-                for (int i = 0; i < count; i++)
+                for (int i = 0; i < table->count; i++)
                 {
-                    if (s_layouts[i].report_id == data[0])
+                    if (table->items[i].report_id == data[0])
                     {
-                        *out = s_layouts[i];
+                        *out = table->items[i];
                         *body = data + 1;
                         *body_len = length - 1;
                         found = true;
@@ -471,13 +478,13 @@ static bool hid_find_layout(const uint8_t *data, int length, hid_mouse_layout_t 
         }
         else
         {
-            *out = s_layouts[0];
+            *out = table->items[0];
             *body = data;
             *body_len = length;
             found = true;
         }
     }
-    portEXIT_CRITICAL(&s_layout_lock);
+    portEXIT_CRITICAL(&s_layout_db.lock);
 
     /* 报文太短(如键盘接口的报文)时不解析, 避免误判成鼠标位移 */
     if (found && *body_len < hid_layout_min_bytes(out))
@@ -584,21 +591,18 @@ static bool hid_load_mouse_layout(hid_host_device_handle_t hid_device_handle)
         return false;
     }
 
-    int count;
-    hid_mouse_layout_t layouts[HID_MAX_LAYOUTS];
+    /* 解析成功后parse已整体提交到live, 内容相同; parse只在本任务中访问 */
+    const hid_layout_table_t *table = &s_layout_db.parse;
 
-    portENTER_CRITICAL(&s_layout_lock);
-    count = s_layout_count;
-    memcpy(layouts, s_layouts, sizeof(layouts));
-    portEXIT_CRITICAL(&s_layout_lock);
-
-    for (int i = 0; i < count; i++)
+    for (int i = 0; i < table->count; i++)
     {
+        const hid_mouse_layout_t *layout = &table->items[i];
+
         ESP_LOGI(TAG, "mouse layout id=%d X=%u/%u%s Y=%u/%u%s buttons=%u@%u",
-                 layouts[i].report_id,
-                 layouts[i].x_bit, layouts[i].x_size, layouts[i].x_signed ? "s" : "u",
-                 layouts[i].y_bit, layouts[i].y_size, layouts[i].y_signed ? "s" : "u",
-                 layouts[i].buttons_num, layouts[i].buttons_bit);
+                 layout->report_id,
+                 layout->x_bit, layout->x_size, layout->x_signed ? "s" : "u",
+                 layout->y_bit, layout->y_size, layout->y_signed ? "s" : "u",
+                 layout->buttons_num, layout->buttons_bit);
     }
 
     return true;
