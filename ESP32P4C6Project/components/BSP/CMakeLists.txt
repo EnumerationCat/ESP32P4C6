@@ -6,7 +6,8 @@ set(src_dirs
             MIPI_CAM
             SDMMC
             FLASH_FAT
-            UART)
+            UART
+            USB)
 
 set(include_dirs
             LED
@@ -16,7 +17,8 @@ set(include_dirs
             MIPI_CAM
             SDMMC
             FLASH_FAT
-            UART)
+            UART
+            USB)
 
 set(requires
             esp_driver_gpio

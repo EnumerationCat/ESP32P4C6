@@ -20,6 +20,7 @@
 #include "mipi_cam.h"
 #include "sdmmc.h"
 #include "flash_fat.h"
+#include "usb_hid_mouse.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -132,6 +133,12 @@ void app_main(void)
     led_init();                 /* LED初始化 */
     lcd_init();                 /* LCD屏初始化 */
     tp_dev.init();              /* 初始化触摸屏(同时初始化I2C总线) */
+
+    /* USB-A口鼠标: 安装USB Host后由LVGL注册为第二个指针设备 */
+    if (usb_hid_mouse_init() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "usb mouse init failed");
+    }
 
     /* 摄像头只做初始化, 点击界面上的相机按钮后再开始全屏预览 */
     if (mipi_cam_init() != ESP_OK)
