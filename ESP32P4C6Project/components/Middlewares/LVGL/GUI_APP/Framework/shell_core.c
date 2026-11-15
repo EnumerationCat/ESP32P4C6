@@ -490,7 +490,7 @@ static void shell_task(void *arg)
     /* line 必须始终以'\0'结尾(插入/重画都依赖这个不变量), 任务栈初始内容不可信 */
     line[0] = 0;
 
-    shell_core_puts("\r\nESP32-P4 app_shell ready. Type 'help'.\r\n");
+    shell_core_puts("\r\nESP32-P4 shell_page ready. Type 'help'.\r\n");
     shell_print_prompt();
 
     for (;;)
@@ -683,6 +683,6 @@ void shell_core_start(void)
     }
     s_started = true;
 
-    xTaskCreate(shell_task, "app_shell", 4096, NULL, 3, NULL);
+    xTaskCreate(shell_task, "shell_page", 4096, NULL, 3, NULL);
     ESP_LOGI(TAG, "shell task started");
 }

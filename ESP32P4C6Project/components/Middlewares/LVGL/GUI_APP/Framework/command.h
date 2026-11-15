@@ -1,6 +1,6 @@
 /**
  * @file command.h
- * @brief app_shell 命令表(参考 GD32 bootloader 的 command.c/h 结构)
+ * @brief shell_page 命令表(参考 GD32 bootloader 的 command.c/h 结构)
  */
 
 #ifndef __COMMAND_H__

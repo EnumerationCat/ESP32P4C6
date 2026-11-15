@@ -1,5 +1,5 @@
 #include "user_home.h"
-#include "app_shell.h"
+#include "shell_page.h"
 #include "lv_btn.h"
 #include "lv_disp.h"
 
@@ -41,7 +41,7 @@ static void camera_btn_event_cb(lv_event_t *e)
 static void shell_btn_event_cb(lv_event_t *e)
 {
     (void)e;
-    app_shell_open();           /* 切换到LCD文本页, 点HOME返回 */
+    shell_page_open();          /* 切换到LCD文本页, 点HOME返回 */
 }
 
 

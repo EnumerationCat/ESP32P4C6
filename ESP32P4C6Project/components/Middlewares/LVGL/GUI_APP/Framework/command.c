@@ -1,6 +1,6 @@
 /**
  * @file command.c
- * @brief app_shell 命令实现与命令表(参考 GD32 bootloader 的 command.c)
+ * @brief shell_page 命令实现与命令表(参考 GD32 bootloader 的 command.c)
  */
 
 #include "command.h"
@@ -192,7 +192,7 @@ static int cmd_help(int argc, char **argv)
 
 static int cmd_hello(int argc, char **argv)
 {
-    shell_core_printf("hello from ESP32-P4 app_shell! argc=%d\r\n", argc);
+    shell_core_printf("hello from ESP32-P4 shell_page! argc=%d\r\n", argc);
     for (int i = 0; i < argc; i++)
     {
         shell_core_printf("  argv[%d] = %s\r\n", i, argv[i]);

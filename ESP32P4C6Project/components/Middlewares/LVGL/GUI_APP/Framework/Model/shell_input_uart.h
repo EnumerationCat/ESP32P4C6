@@ -11,9 +11,9 @@ extern "C" {
 #endif
 
 /**
- * @brief       安装UART0驱动并启动采集任务
- * @note        在 shell_core_init() 之后调用; 采集到的字节通过
- *              shell_core_input_push_wait() 投递给shell任务
+ * @brief       通过BSP安装UART0驱动并启动采集任务
+ * @note        在 shell_core_init() 之后调用; UART硬件参数配置在BSP层(uart_device_init),
+ *              本层只负责取字节并通过 shell_core_input_push_wait() 投递给shell任务
  * @param       无
  * @retval      无
  */

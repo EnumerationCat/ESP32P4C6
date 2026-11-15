@@ -5,7 +5,8 @@ set(src_dirs
             TOUCH
             MIPI_CAM
             SDMMC
-            FLASH_FAT)
+            FLASH_FAT
+            UART)
 
 set(include_dirs
             LED
@@ -14,7 +15,8 @@ set(include_dirs
             TOUCH
             MIPI_CAM
             SDMMC
-            FLASH_FAT)
+            FLASH_FAT
+            UART)
 
 set(requires
             esp_driver_gpio
@@ -23,6 +25,7 @@ set(requires
             esp_driver_i2c
             esp_driver_ppa
             esp_driver_sdmmc
+            esp_driver_uart
             esp_hw_support
             esp_mm
             esp_timer

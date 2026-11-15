@@ -11,7 +11,7 @@
 #include "lv_port_indev.h"
 #include "lv_port_fs.h"
 #include "user_home.h"
-#include "app_shell.h"
+#include "shell_page.h"
 #include "wifi_manager.h"
 #include "ap_wifi.h"
 #include "onenet_mqtt.h"
@@ -100,7 +100,7 @@ static void lvgl_task(void *arg)
         }
 
         lv_timer_handler();
-        app_shell_tick();       /* 把串口shell输出刷到LCD文本页 */
+        shell_page_tick();      /* 把串口shell输出刷到LCD文本页 */
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
@@ -122,7 +122,7 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    app_shell_init();           /* 串口命令行(UART0): help/hello/free/clear/reboot, 输出镜像到LCD */
+    shell_page_init();          /* 串口命令行(UART0): help/hello/free/clear/reboot, 输出镜像到LCD */
 
     sdmmc_init();               /* 挂载SD卡: LVGL文件系统盘符 D: -> /User */
     flash_fat_init();           /* 挂载Flash FAT分区: LVGL文件系统盘符 C: -> /Factory */

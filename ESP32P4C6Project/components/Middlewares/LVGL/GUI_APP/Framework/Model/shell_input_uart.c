@@ -1,10 +1,11 @@
 /**
  * @file shell_input_uart.c
- * @brief 串口输入源: 安装UART0驱动并把收到的字节投递给shell_core
+ * @brief 串口输入源: 通过BSP安装UART驱动并把收到的字节投递给shell_core
  */
 
 #include "shell_input_uart.h"
 #include "shell_core.h"
+#include "uart_device.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -32,19 +33,8 @@ static void shell_uart_rx_task(void *arg)
 
 void shell_input_uart_init(void)
 {
-    const uart_config_t cfg =
-    {
-        .baud_rate = SHELL_UART_BAUD,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-
-    ESP_ERROR_CHECK(uart_param_config(SHELL_UART_NUM, &cfg));
-    ESP_ERROR_CHECK(uart_driver_install(SHELL_UART_NUM, 2048, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_device_init(SHELL_UART_NUM, SHELL_UART_BAUD));
 
     xTaskCreate(shell_uart_rx_task, "shell_uart_rx", 2048, NULL, 4, NULL);
-    ESP_LOGI(TAG, "UART0 ready, 115200");
+    ESP_LOGI(TAG, "UART%d ready, %d baud", (int)SHELL_UART_NUM, SHELL_UART_BAUD);
 }
