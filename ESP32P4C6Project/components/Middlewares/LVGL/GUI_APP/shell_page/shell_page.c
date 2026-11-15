@@ -5,6 +5,7 @@
  * 显示部分: shell_ui_t 的第一个成员是 view_t base(继承Framework基类), 通过它暴露生命周期回调:
  *   init/deinit         创建/销毁控件
  *   on_start/on_pause   进入/离开页面
+ *   on_resume           从挂起栈恢复(重新载入屏幕)
  *   on_update           周期刷新(presenter: 拉model快照 -> view)
  *   on_stop             停止页面
  *   on_event            事件分发(按eventID字符串比较)
@@ -18,6 +19,7 @@
 #include "shell_input_uart.h"
 #include "view.h"
 #include "page_manager.h"
+#include "user_home_page.h"
 #include "container_of.h"
 #include "lvgl.h"
 
@@ -50,7 +52,6 @@ typedef struct
     lv_obj_t *term_cont;                    /* 可滚动终端区 */
     lv_obj_t *term_label;                   /* 文本标签 */
     lv_obj_t *cursor_obj;                   /* 输入光标竖条(term_label的子对象) */
-    lv_obj_t *home_screen;                  /* 进入shell前的屏幕(外部页面) */
 } shell_ui_t;
 
 /**********************
@@ -285,7 +286,6 @@ static void shell_deinit(view_t *self)
     ui->term_cont = NULL;
     ui->term_label = NULL;
     ui->cursor_obj = NULL;
-    /* home_screen 属于外部页面, 不在这里销毁 */
 }
 
 /* 进入页面: 重置终端文本为一行提示符, 并在串口同步提示符 */
@@ -298,11 +298,6 @@ static void shell_on_start(view_t *self)
     if (lv_scr_act() == ui->screen)
     {
         return;
-    }
-
-    if (ui->home_screen == NULL)
-    {
-        ui->home_screen = lv_scr_act();
     }
 
     shell_core_reset_to_prompt();
@@ -352,7 +347,7 @@ static void shell_on_stop(view_t *self)
 /* 事件分发: 按eventID字符串比较 */
 static void shell_on_event(view_t *self, const char *event_id)
 {
-    shell_ui_t *ui = shell_ui(self);
+    (void)self;
 
     if (event_id == NULL)
     {
@@ -361,13 +356,8 @@ static void shell_on_event(view_t *self, const char *event_id)
 
     if (strcmp(event_id, "home") == 0)
     {
-        /* 先切回主界面, 再关闭页面(关闭会删除shell屏幕, 不能删当前活动屏) */
-        if (ui->home_screen != NULL)
-        {
-            lv_scr_load(ui->home_screen);
-        }
-
-        page_close(self);       /* 交给页面管理器: on_stop + 恢复挂起页 */
+        /* 交给页面管理器: 本页挂起(on_pause), 主界面恢复(on_resume) */
+        manager_gopage(USER_HOME_PAGE_ID);
     }
 }
 
@@ -384,11 +374,6 @@ void shell_page_init(void)
 
     page_manager_init();
     page_register(&s_ui.base);
-}
-
-void shell_page_open(void)
-{
-    page_open(&s_ui.base);
 }
 
 void shell_page_puts(const char *s)

@@ -4,7 +4,7 @@
  *
  * 页面 = 显示层(view) + 模块初始化接口:
  *  - init 创建数据层、安装UART0驱动、启动shell任务并注册到page_manager;
- *  - open 由page_manager驱动, 进入页面时创建控件并刷新;
+ *  - 进入/切回页面统一走 manager_gopage(SHELL_PAGE_ID), 由页面管理器驱动生命周期;
  *  - puts/printf/clear/input_push 供命令实现和输入源使用的model快捷接口。
  *
  * 依赖: Framework/shell_core(数据层)、Framework/Model/shell_input_uart(输入源)、
@@ -23,7 +23,7 @@ extern "C" {
 /**********************
  *      DEFINES
  **********************/
-#define SHELL_PAGE_ID   1       /* 页面ID(page_manager注册表主键) */
+#define SHELL_PAGE_ID   2       /* 页面ID(page_manager注册表主键) */
 
 /**********************
  * GLOBAL PROTOTYPES
@@ -36,14 +36,6 @@ extern "C" {
  * @retval      无
  */
 void shell_page_init(void);
-
-/**
- * @brief       切换到LCD文本页(只在LVGL任务中调用)
- * @note        走 page_open, 由页面管理器处理挂起/启动; 刷新由 page_manager_tick 驱动
- * @param       无
- * @retval      无
- */
-void shell_page_open(void);
 
 /**
  * @brief       向UART和终端文本缓冲输出字符串(供命令实现使用)

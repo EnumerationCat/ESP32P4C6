@@ -286,7 +286,7 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				LVGL/GUI_APP/demos/benchmark/assets/lv_font_bechmark_montserrat_16_compr_az.c.c
 				LVGL/GUI_APP/demos/benchmark/assets/lv_font_bechmark_montserrat_28_compr_az.c.c
 
-				LVGL/GUI_APP/user_home/user_home.c
+				LVGL/GUI_APP/user_home_page/user_home_page.c
 				LVGL/GUI_APP/shell_page/shell_page.c
 				LVGL/GUI_APP/Framework/Manage/list_head.c
 				LVGL/GUI_APP/Framework/Manage/page_manager.c
@@ -328,7 +328,7 @@ set(include_dirs wifi_manager
 				 LVGL/GUI_APP/Framework/View
 				 LVGL/GUI_APP/Framework/Manage
 				 LVGL/GUI_APP/shell_page
-				 LVGL/GUI_APP/user_home
+				 LVGL/GUI_APP/user_home_page
 
 
 )

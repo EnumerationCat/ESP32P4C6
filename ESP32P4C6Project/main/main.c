@@ -10,7 +10,7 @@
 #include "lv_port_disp.h"
 #include "lv_port_indev.h"
 #include "lv_port_fs.h"
-#include "user_home.h"
+#include "user_home_page.h"
 #include "shell_page.h"
 #include "page_manager.h"
 #include "wifi_manager.h"
@@ -80,7 +80,7 @@ static void lvgl_task(void *arg)
                           lv_palette_main(LV_PALETTE_RED),
                           LV_THEME_DEFAULT_DARK, LV_FONT_DEFAULT);
 
-    user_home();                        /* 显示主界面 */
+    manager_gopage(USER_HOME_PAGE_ID);  /* 显示主界面 */
 
     bool preview_was_active = false;
 
@@ -124,6 +124,7 @@ void app_main(void)
     }
 
     shell_page_init();          /* 串口命令行(UART0): help/hello/free/clear/reboot, 输出镜像到LCD */
+    user_home_page_init();      /* 注册主界面页面(相机入口 + 命令行入口) */
 
     sdmmc_init();               /* 挂载SD卡: LVGL文件系统盘符 D: -> /User */
     flash_fat_init();           /* 挂载Flash FAT分区: LVGL文件系统盘符 C: -> /Factory */
@@ -137,7 +138,7 @@ void app_main(void)
     {
         ESP_LOGW(TAG, "mipi camera init failed");
     }
-    user_home_set_camera_cb(camera_btn_handler);
+    user_home_page_set_camera_cb(camera_btn_handler);
 
     /* WiFi初始化并连接热点 */
     onenet_dm_init();
