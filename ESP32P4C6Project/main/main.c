@@ -12,6 +12,8 @@
 #include "lv_port_fs.h"
 #include "user_home_page.h"
 #include "shell_page.h"
+#include "video_page.h"
+#include "videoplay.h"
 #include "page_manager.h"
 #include "wifi_manager.h"
 #include "ap_wifi.h"
@@ -87,8 +89,8 @@ static void lvgl_task(void *arg)
 
     while (1)
     {
-        /* 摄像头全屏预览期间暂停LVGL刷新, 避免和摄像头抢LCD帧缓冲 */
-        if (mipi_cam_preview_active())
+        /* 摄像头/视频全屏播放期间暂停LVGL刷新, 避免和它们抢LCD帧缓冲 */
+        if (mipi_cam_preview_active() || videoplay_active())
         {
             preview_was_active = true;
             vTaskDelay(pdMS_TO_TICKS(20));
@@ -126,6 +128,7 @@ void app_main(void)
 
     shell_page_init();          /* 串口命令行(UART0): help/hello/free/clear/reboot, 输出镜像到LCD */
     user_home_page_init();      /* 注册主界面页面(相机入口 + 命令行入口) */
+    video_page_init();          /* 注册视频页: 列出 /User/VIDEO 下的 AVI 并播放 */
 
     sdmmc_init();               /* 挂载SD卡: LVGL文件系统盘符 D: -> /User */
     flash_fat_init();           /* 挂载Flash FAT分区: LVGL文件系统盘符 C: -> /Factory */

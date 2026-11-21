@@ -7,6 +7,7 @@ set(src_dirs
             SDMMC
             FLASH_FAT
             UART
+            VIDEO_PLAY
             USB)
 
 set(include_dirs
@@ -18,10 +19,12 @@ set(include_dirs
             SDMMC
             FLASH_FAT
             UART
+            VIDEO_PLAY
             USB)
 
 set(requires
             esp_driver_gpio
+            esp_driver_jpeg
             esp_lcd
             esp_common
             esp_driver_i2c

@@ -8,6 +8,7 @@
 
 #include "user_home_page.h"
 #include "shell_page.h"
+#include "video_page.h"
 #include "page_manager.h"
 #include "view.h"
 #include "container_of.h"
@@ -82,6 +83,14 @@ static void shell_btn_event_cb(lv_event_t *e)
     manager_gopage(SHELL_PAGE_ID);
 }
 
+/* 视频页按钮事件回调 */
+static void video_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+
+    manager_gopage(VIDEO_PAGE_ID);
+}
+
 /* 创建主界面控件(幂等) */
 static void home_init(view_t *self)
 {
@@ -120,6 +129,17 @@ static void home_init(view_t *self)
     lv_obj_center(shell_label);
 
     lv_obj_add_event_cb(shell_btn, shell_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    /* ==================== 视频页面按钮 ==================== */
+    lv_obj_t *video_btn = lv_btn_create(object);
+    lv_obj_set_size(video_btn, 60, 60);
+    lv_obj_set_pos(video_btn, 90, 210);
+
+    lv_obj_t *video_label = lv_label_create(video_btn);
+    lv_label_set_text(video_label, "VIDEO");
+    lv_obj_center(video_label);
+
+    lv_obj_add_event_cb(video_btn, video_btn_event_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* 销毁主界面控件 */
