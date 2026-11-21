@@ -161,6 +161,22 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.1.2
+  espressif/esp_tinyusb:
+    component_hash: 0bd9c57b7d17a45336a54949fe49f728c405b6775239dacebed818231d474929
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    - esp32s31
+    version: 3.0.1
   espressif/esp_video:
     component_hash: 5694b16c12b8bb26b56ad3f999ad10119f1314d64b2d1c518bc7dfed902df9e1
     dependencies:
@@ -324,11 +340,12 @@ direct_dependencies:
 - espressif/cjson
 - espressif/esp_cam_sensor
 - espressif/esp_sccb_intf
+- espressif/esp_tinyusb
 - espressif/esp_video
 - espressif/esp_wifi_remote
 - espressif/mqtt
 - espressif/usb_host_hid
 - idf
-manifest_hash: fb519545c7a07c846c0820aafe59ada31655fd38e3974827de4b727b1961979f
+manifest_hash: ad4b3db0e82837349f8f0a95778d303b27e82d7d2f6e98dc428d8863674320a5
 target: esp32p4
 version: 3.0.0

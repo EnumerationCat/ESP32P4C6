@@ -30,7 +30,8 @@
 typedef enum
 {
     SDMMC_MOUNT_STATE_UNMOUNTED = 0,    /* 未挂载 */
-    SDMMC_MOUNT_STATE_MOUNTED,          /* 已挂载 */
+    SDMMC_MOUNT_STATE_MOUNTED,          /* 已挂载FATFS */
+    SDMMC_MOUNT_STATE_RAW,              /* 已初始化, 未挂载FATFS(USB MSC/U盘模式) */
     SDMMC_MOUNT_STATE_FAILED,           /* 挂载失败 */
 } sdmmc_mount_state_t;
 
@@ -39,8 +40,10 @@ extern sdmmc_card_t *card;
 extern sdmmc_mount_state_t sdmmc_mount_state;   /* SD卡挂载状态 */
 
 /* 函数声明 */
-esp_err_t sdmmc_init(void);               /* SD卡初始化并挂载 */
-esp_err_t sdmmc_unmount(void);            /* 取消挂载SD卡 */
+esp_err_t sdmmc_init(void);               /* SD卡初始化并挂载FATFS */
+esp_err_t sdmmc_unmount(void);            /* 取消挂载SD卡(会释放card) */
+esp_err_t sdmmc_init_raw(void);           /* 初始化SD卡但不挂载FATFS(U盘模式) */
+esp_err_t sdmmc_deinit_raw(void);         /* 反初始化裸模式 */
 void sd_dev_bsp_enable_phy_power(void);   /* 配置SD phy电压 */
 
 #endif

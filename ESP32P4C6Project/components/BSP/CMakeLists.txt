@@ -34,6 +34,7 @@ set(requires
             esp_hw_support
             esp_mm
             esp_timer
+            esp_tinyusb
             fatfs
             sdmmc
             vfs

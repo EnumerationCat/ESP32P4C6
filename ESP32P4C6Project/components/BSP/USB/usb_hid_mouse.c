@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 
 #include "usb/usb_host.h"
@@ -89,7 +90,11 @@ typedef struct
     hid_layout_db_t layouts;            /* 报告描述符解析出的布局 */
 
     QueueHandle_t layout_queue;         /* 接口启动任务队列 */
+    TaskHandle_t layout_task;           /* 取描述符/启动接口的任务 */
+    SemaphoreHandle_t layout_stopped;   /* layout_task退出完成 */
+    SemaphoreHandle_t host_uninstalled; /* usb_host_uninstall完成 */
     int debug_reports;                  /* 已打印的调试报文数 */
+    bool installed;                     /* USB Host/HID当前已安装 */
 } usb_hid_mouse_ctx_t;
 
 static usb_hid_mouse_ctx_t s_ctx = {
@@ -643,6 +648,7 @@ typedef struct
 {
     hid_host_device_handle_t handle;
     bool load_layout;
+    bool stop;              /* 通知任务退出(卸载USB Host前使用) */
 } hid_layout_job_t;
 
 /**
@@ -667,6 +673,11 @@ static void hid_layout_task(void *arg)
             continue;
         }
 
+        if (job.stop)
+        {
+            break;      /* 卸载流程要求退出, 不能再碰已经失效的句柄 */
+        }
+
         if (job.load_layout)
         {
             hid_load_mouse_layout(job.handle);
@@ -687,6 +698,9 @@ static void hid_layout_task(void *arg)
         s_ctx.state.connected = true;
         portEXIT_CRITICAL(&s_ctx.state_lock);
     }
+
+    xSemaphoreGive(s_ctx.layout_stopped);
+    vTaskDelete(NULL);
 }
 
 /**
@@ -903,11 +917,62 @@ static void usb_lib_task(void *arg)
     {
         ESP_LOGW(TAG, "usb_host_uninstall failed");
     }
+
+    if (s_ctx.host_uninstalled != NULL)
+    {
+        xSemaphoreGive(s_ctx.host_uninstalled);
+    }
+
     vTaskDelete(NULL);
 }
 
 esp_err_t usb_hid_mouse_init(void)
 {
+    if (s_ctx.installed)
+    {
+        return ESP_OK;
+    }
+
+    /* 同步信号量只创建一次; 卸载/重装会复用 */
+    if (s_ctx.host_uninstalled == NULL)
+    {
+        s_ctx.host_uninstalled = xSemaphoreCreateBinary();
+        if (s_ctx.host_uninstalled == NULL)
+        {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (s_ctx.layout_stopped == NULL)
+    {
+        s_ctx.layout_stopped = xSemaphoreCreateBinary();
+        if (s_ctx.layout_stopped == NULL)
+        {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    /* 启动任务: 取报告描述符 + 启动接口(不能在HID回调任务里做) */
+    if (s_ctx.layout_queue == NULL)
+    {
+        s_ctx.layout_queue = xQueueCreate(8, sizeof(hid_layout_job_t));
+        if (s_ctx.layout_queue == NULL)
+        {
+            ESP_LOGE(TAG, "create layout queue failed");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (s_ctx.layout_task == NULL)
+    {
+        if (xTaskCreate(hid_layout_task, "hid_layout", 4096, NULL, 3,
+                        &s_ctx.layout_task) != pdPASS)
+        {
+            ESP_LOGE(TAG, "create hid_layout task failed");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     /* 创建USB线程 */
     BaseType_t task_created = xTaskCreatePinnedToCore(usb_lib_task,
                                                       "usb_events",
@@ -922,20 +987,6 @@ esp_err_t usb_hid_mouse_init(void)
 
     /* 等待USB Host安装完成 */
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
-
-    /* 启动任务: 取报告描述符 + 启动接口(不能在HID回调任务里做) */
-    s_ctx.layout_queue = xQueueCreate(8, sizeof(hid_layout_job_t));
-    if (s_ctx.layout_queue == NULL)
-    {
-        ESP_LOGE(TAG, "create layout queue failed");
-        return ESP_ERR_NO_MEM;
-    }
-
-    if (xTaskCreate(hid_layout_task, "hid_layout", 4096, NULL, 3, NULL) != pdPASS)
-    {
-        ESP_LOGE(TAG, "create hid_layout task failed");
-        return ESP_ERR_NO_MEM;
-    }
 
     /* HID主机配置 */
     const hid_host_driver_config_t hid_host_driver_config = {
@@ -954,7 +1005,73 @@ esp_err_t usb_hid_mouse_init(void)
         return ret;
     }
 
+    s_ctx.installed = true;
     ESP_LOGI(TAG, "USB HID mouse ready");
+    return ESP_OK;
+}
+
+esp_err_t usb_hid_mouse_deinit(void)
+{
+    if (!s_ctx.installed)
+    {
+        return ESP_OK;
+    }
+
+    /* 1. 先让布局任务退出, 避免USB卸载后它还在用旧句柄发控制传输 */
+    if (s_ctx.layout_task != NULL)
+    {
+        hid_layout_job_t stop_job = {
+            .handle = NULL,
+            .load_layout = false,
+            .stop = true,
+        };
+
+        (void)xQueueSend(s_ctx.layout_queue, &stop_job, pdMS_TO_TICKS(200));
+
+        if (xSemaphoreTake(s_ctx.layout_stopped, pdMS_TO_TICKS(7000)) == pdTRUE)
+        {
+            s_ctx.layout_task = NULL;
+        }
+        else
+        {
+            /* 描述符控制传输最长5秒, 超时说明任务卡住, 强制删除 */
+            ESP_LOGW(TAG, "layout task stop timeout, force delete");
+            vTaskDelete(s_ctx.layout_task);
+            s_ctx.layout_task = NULL;
+        }
+    }
+
+    /* 2. 注销HID类驱动, usb_lib_task收到NO_CLIENTS后会卸载USB Host */
+    esp_err_t ret = hid_host_uninstall();
+    if (ret != ESP_OK)
+    {
+        ESP_LOGW(TAG, "hid_host_uninstall failed: %s", esp_err_to_name(ret));
+    }
+
+    if (xSemaphoreTake(s_ctx.host_uninstalled, pdMS_TO_TICKS(5000)) != pdTRUE)
+    {
+        ESP_LOGW(TAG, "usb host uninstall timeout");
+    }
+
+    /* 3. 清状态, 丢弃遗留的接口启动请求 */
+    if (s_ctx.layout_queue != NULL)
+    {
+        xQueueReset(s_ctx.layout_queue);
+    }
+
+    portENTER_CRITICAL(&s_ctx.state_lock);
+    s_ctx.state.connected = false;
+    s_ctx.state.pending = false;
+    s_ctx.state.mouse_iface = false;
+    s_ctx.state.dx = 0;
+    s_ctx.state.dy = 0;
+    s_ctx.state.buttons = 0;
+    portEXIT_CRITICAL(&s_ctx.state_lock);
+
+    s_ctx.debug_reports = 0;
+    s_ctx.installed = false;
+
+    ESP_LOGI(TAG, "USB HID mouse deinitialized");
     return ESP_OK;
 }
 

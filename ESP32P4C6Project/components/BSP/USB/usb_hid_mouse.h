@@ -48,6 +48,15 @@ typedef struct
 esp_err_t usb_hid_mouse_init(void);
 
 /**
+ * @brief       卸载USB HID鼠标: 注销HID类驱动并卸载USB Host
+ * @note        用于切换USB口工作模式(如U盘模式需要该口做Device)。
+ *              卸载后可用 usb_hid_mouse_init() 重新安装。
+ * @param       无
+ * @retval      ESP_OK:卸载完成
+ */
+esp_err_t usb_hid_mouse_deinit(void);
+
+/**
  * @brief       读取自上次调用以来累计的鼠标位移和当前按键状态
  * @note        非阻塞, 可在任意任务中调用
  * @param       report: 输出报表(仅在返回true时有效)
