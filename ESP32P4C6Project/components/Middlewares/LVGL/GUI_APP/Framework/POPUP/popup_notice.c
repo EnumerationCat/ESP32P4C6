@@ -22,7 +22,7 @@
 #define POPUP_PRIORITY_NOTICE      10                  /* 系统级队列内优先级 */
 
 #define POPUP_NOTICE_W             280                 /* 提示弹窗尺寸/位置 */
-#define POPUP_NOTICE_H             96
+#define POPUP_NOTICE_HEIGHT             96
 #define POPUP_NOTICE_MARGIN_X      ((LV_HOR_RES - POPUP_NOTICE_W) / 2)
 #define POPUP_NOTICE_REST_Y        56
 
@@ -110,8 +110,8 @@ static void notice_timer_cb(lv_timer_t *timer)
 static void notice_slide_in(popup_notice_ui_t *ui)
 {
     lv_anim_del(ui->panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
-    lv_obj_set_y(ui->panel, -POPUP_NOTICE_H);
-    popup_slide_y(ui->panel, -POPUP_NOTICE_H, POPUP_NOTICE_REST_Y, NULL);
+    lv_obj_set_y(ui->panel, -POPUP_NOTICE_HEIGHT);
+    popup_slide_y(ui->panel, -POPUP_NOTICE_HEIGHT, POPUP_NOTICE_REST_Y, NULL);
     ui->hiding = false;
 }
 
@@ -137,13 +137,13 @@ static void notice_on_start(view_t *self)
 
     /* 系统级弹窗画在 sys 层, 永远在应用级弹窗和页面之上 */
     ui->panel = lv_obj_create(lv_layer_sys());
-    lv_obj_set_size(ui->panel, POPUP_NOTICE_W, POPUP_NOTICE_H);
+    lv_obj_set_size(ui->panel, POPUP_NOTICE_W, POPUP_NOTICE_HEIGHT);
     lv_obj_set_style_radius(ui->panel, 12, LV_PART_MAIN);
     lv_obj_set_style_bg_color(ui->panel, lv_color_make(0x33, 0x33, 0x33), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ui->panel, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(ui->panel, 0, LV_PART_MAIN);
     lv_obj_clear_flag(ui->panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(ui->panel, POPUP_NOTICE_MARGIN_X, -POPUP_NOTICE_H);
+    lv_obj_set_pos(ui->panel, POPUP_NOTICE_MARGIN_X, -POPUP_NOTICE_HEIGHT);
 
     ui->label = lv_label_create(ui->panel);
     lv_obj_set_width(ui->label, POPUP_NOTICE_W - 32);
@@ -229,7 +229,7 @@ void popup_notice_hide(void)
 
     lv_anim_del(s_notice.panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
     popup_slide_y(s_notice.panel, lv_obj_get_y(s_notice.panel),
-                  -POPUP_NOTICE_H, notice_out_ready_cb);
+                  -POPUP_NOTICE_HEIGHT, notice_out_ready_cb);
 }
 
 bool popup_notice_visible(void)

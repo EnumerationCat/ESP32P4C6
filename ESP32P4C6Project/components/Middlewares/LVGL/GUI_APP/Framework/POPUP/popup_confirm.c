@@ -23,9 +23,9 @@
 #define POPUP_PRIORITY_CONFIRM     20                  /* 应用级队列内优先级 */
 
 #define POPUP_CONFIRM_W            300                 /* 确认弹窗尺寸/位置 */
-#define POPUP_CONFIRM_H            200
+#define POPUP_CONFIRM_HEIGHT            200
 #define POPUP_CONFIRM_MARGIN_X     ((LV_HOR_RES - POPUP_CONFIRM_W) / 2)
-#define POPUP_CONFIRM_REST_Y       (LV_VER_RES - POPUP_CONFIRM_H - 20)
+#define POPUP_CONFIRM_REST_Y       (LV_VER_RES - POPUP_CONFIRM_HEIGHT - 20)
 #define POPUP_BTN_W                120                 /* 按钮尺寸/左右下边距 */
 #define POPUP_BTN_H                44
 #define POPUP_BTN_MARGIN           20
@@ -163,7 +163,7 @@ static void confirm_on_start(view_t *self)
 
     /* 底部面板 */
     ui->panel = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(ui->panel, POPUP_CONFIRM_W, POPUP_CONFIRM_H);
+    lv_obj_set_size(ui->panel, POPUP_CONFIRM_W, POPUP_CONFIRM_HEIGHT);
     lv_obj_set_style_radius(ui->panel, 16, LV_PART_MAIN);
     lv_obj_set_style_bg_color(ui->panel, lv_color_make(0x2B, 0x2B, 0x2B), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ui->panel, LV_OPA_COVER, LV_PART_MAIN);
