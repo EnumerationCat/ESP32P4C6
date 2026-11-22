@@ -32,11 +32,17 @@ static const char *TAG = "videoplay";
 #define FRAME_GUARD_US      500000      /* 启动后忽略触摸的时间, 避免按下播放按钮的手指立即退出 */
 #define DEFAULT_FRAME_US    33333       /* 帧间隔无效时的默认值(30fps) */
 
-static volatile bool s_active = false;      /* 播放任务运行中(LVGL 据此暂停刷新) */
-static volatile bool s_stop_req = false;    /* 请求停止 */
-static volatile bool s_frame_ready = false; /* 帧间隔定时器到期 */
-static char s_path[256];                    /* 当前文件路径(传给任务, 避免调用者字符串失效) */
-static esp_timer_handle_t s_frame_timer = NULL;
+/* 播放器运行状态 */
+typedef struct
+{
+    volatile bool active;           /* 播放任务运行中(LVGL 据此暂停刷新) */
+    volatile bool stop_req;         /* 请求停止 */
+    volatile bool frame_ready;      /* 帧间隔定时器到期 */
+    char path[256];                 /* 当前文件路径(传给任务, 避免调用者字符串失效) */
+    esp_timer_handle_t frame_timer; /* 帧间隔定时器 */
+} videoplay_state_t;
+
+static videoplay_state_t s_play = {0};
 
 /**
  * @brief       帧间隔定时器回调
@@ -46,7 +52,7 @@ static esp_timer_handle_t s_frame_timer = NULL;
 static void frame_timer_cb(void *arg)
 {
     (void)arg;
-    s_frame_ready = true;
+    s_play.frame_ready = true;
 }
 
 /**
@@ -74,17 +80,17 @@ static esp_err_t frame_timer_start(uint32_t period_us)
         .name = "video_frame",
     };
 
-    if (s_frame_timer == NULL)
+    if (s_play.frame_timer == NULL)
     {
-        esp_err_t ret = esp_timer_create(&args, &s_frame_timer);
+        esp_err_t ret = esp_timer_create(&args, &s_play.frame_timer);
         if (ret != ESP_OK)
         {
             return ret;
         }
     }
 
-    s_frame_ready = false;
-    return esp_timer_start_periodic(s_frame_timer, period_us);
+    s_play.frame_ready = false;
+    return esp_timer_start_periodic(s_play.frame_timer, period_us);
 }
 
 /**
@@ -94,11 +100,11 @@ static esp_err_t frame_timer_start(uint32_t period_us)
  */
 static void frame_timer_stop(void)
 {
-    if (s_frame_timer != NULL)
+    if (s_play.frame_timer != NULL)
     {
-        esp_timer_stop(s_frame_timer);
-        esp_timer_delete(s_frame_timer);
-        s_frame_timer = NULL;
+        esp_timer_stop(s_play.frame_timer);
+        esp_timer_delete(s_play.frame_timer);
+        s_play.frame_timer = NULL;
     }
 }
 
@@ -130,10 +136,10 @@ static void videoplay_task(void *arg)
         goto cleanup;
     }
 
-    f = fopen(s_path, "rb");
+    f = fopen(s_play.path, "rb");
     if (f == NULL)
     {
-        ESP_LOGE(TAG, "open %s failed", s_path);
+        ESP_LOGE(TAG, "open %s failed", s_play.path);
         goto cleanup;
     }
 
@@ -203,9 +209,9 @@ static void videoplay_task(void *arg)
     }
 
     guard_until = esp_timer_get_time() + FRAME_GUARD_US;
-    ESP_LOGI(TAG, "playing %s", s_path);
+    ESP_LOGI(TAG, "playing %s", s_play.path);
 
-    while (!s_stop_req)
+    while (!s_play.stop_req)
     {
         uint32_t want = g_avix.StreamSize + 8;      /* 当前块数据 + 下一块的 8 字节头 */
         bool last_chunk;
@@ -227,11 +233,11 @@ static void videoplay_task(void *arg)
             }
 
             /* 等待帧间隔 */
-            while (!s_frame_ready && !s_stop_req)
+            while (!s_play.frame_ready && !s_play.stop_req)
             {
                 vTaskDelay(1);
             }
-            s_frame_ready = false;
+            s_play.frame_ready = false;
         }
         else if (g_avix.StreamID == AVI_AUDS_FLAG && audio_started)
         {
@@ -292,7 +298,7 @@ cleanup:
     }
 
     ESP_LOGI(TAG, "playback finished (%s)", ok ? "ok" : "error");
-    s_active = false;
+    s_play.active = false;
     vTaskDelete(NULL);
 }
 
@@ -308,24 +314,24 @@ esp_err_t videoplay_play(const char *path)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (s_active)
+    if (s_play.active)
     {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (strlen(path) >= sizeof(s_path))
+    if (strlen(path) >= sizeof(s_play.path))
     {
         return ESP_ERR_INVALID_SIZE;
     }
 
-    strlcpy(s_path, path, sizeof(s_path));
-    s_stop_req = false;
-    s_frame_ready = false;
-    s_active = true;    /* 先置位: LVGL 任务立即暂停刷新 */
+    strlcpy(s_play.path, path, sizeof(s_play.path));
+    s_play.stop_req = false;
+    s_play.frame_ready = false;
+    s_play.active = true;    /* 先置位: LVGL 任务立即暂停刷新 */
 
     if (xTaskCreate(videoplay_task, "videoplay", 8192, NULL, 4, NULL) != pdPASS)
     {
-        s_active = false;
+        s_play.active = false;
         return ESP_ERR_NO_MEM;
     }
 
@@ -339,7 +345,7 @@ esp_err_t videoplay_play(const char *path)
  */
 bool videoplay_active(void)
 {
-    return s_active;
+    return s_play.active;
 }
 
 /**
@@ -349,5 +355,5 @@ bool videoplay_active(void)
  */
 void videoplay_stop(void)
 {
-    s_stop_req = true;
+    s_play.stop_req = true;
 }
