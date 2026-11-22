@@ -2,10 +2,11 @@
  * @file popup.h
  * @brief 弹窗(Framework/POPUP): 顶部滑入提示 + 底部双按钮确认
  *
- * 两个弹窗都是 view_t(Framework/View/view.h) 派生对象, 走 page_manager 的
- * 弹窗接口 page_popup_open()/page_popup_close():
- *  - 打开时底层页 on_pause, 全部弹窗关闭后底层页 on_resume;
- *  - 控件挂到 lv_layer_top() 上, 覆盖在当前页面之上, 不替换页面屏幕;
+ * 两个弹窗都是 view_t(Framework/View/view.h) 派生对象, 由 popup_manager 管理:
+ *  - 打开/关闭弹窗不会暂停页面, 页面状态保持不变;
+ *  - 提示弹窗是应用级(lv_layer_top), 切页时自动关闭;
+ *  - 确认弹窗是系统级(lv_layer_sys), 永远在最上层, 切页时保留;
+ *  - 控件挂在显示层上而不是屏幕上, 不替换当前页面;
  *  - 只能在 LVGL 任务中调用。
  *
  * 用法示例:

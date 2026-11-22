@@ -2,18 +2,19 @@
  * @file popup.c
  * @brief 弹窗实现: 顶部滑入提示 + 底部双按钮确认
  *
- * 两个弹窗都是 view_t 派生对象(与页面相同的C式继承), 通过 page_manager 的
- * page_popup_open()/page_popup_close() 管理生命周期:
- *   popup_open  -> 底层页 on_pause, 弹窗 on_start(创建控件并播放滑入动画)
- *   popup_close -> 弹窗 on_stop(删除控件), 全部弹窗关闭后底层页 on_resume
+ * 两个弹窗都是 view_t 派生对象(与页面相同的C式继承), 通过 popup_manager 的
+ * popup_manager_open()/popup_manager_close() 管理生命周期:
+ *   open  -> 弹窗 on_start(创建控件并播放滑入动画), 按层级+优先级入队
+ *   close -> 弹窗 on_stop(删除控件), 不影响页面栈, 也不会暂停页面
  *
- * 控件都挂在 lv_layer_top() 上, 因此不会替换当前页面的屏幕, 只覆盖显示;
- * 弹窗关闭时把控件删掉即可, 底层页面原样还在。
+ * 分层: 提示弹窗是应用级(挂 lv_layer_top()), 确认弹窗是系统级(挂 lv_layer_sys()),
+ * 因此确认弹窗永远盖在提示弹窗和页面之上, 且切换页面时不会被清掉。
+ * 控件挂在层上而不是屏幕上, 关闭时把控件删掉即可, 底层页面原样还在。
  * 本文件所有函数都必须在 LVGL 任务中调用。
  */
 
 #include "popup.h"
-#include "page_manager.h"
+#include "popup_manager.h"
 #include "view.h"
 #include "container_of.h"
 #include "lvgl.h"
@@ -165,7 +166,7 @@ static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
 static void notice_out_ready_cb(lv_anim_t *a)
 {
     (void)a;
-    page_popup_close(&s_notice.base);
+    popup_manager_close(&s_notice.base);
 }
 
 /* 自动收回(定时器回调) */
@@ -277,7 +278,7 @@ void popup_notice_show(const char *text, uint32_t duration_ms)
         return;
     }
 
-    page_popup_open(&s_notice.base, POPUP_PRIORITY_NOTICE);
+    popup_manager_open(&s_notice.base, POPUP_LEVEL_APP, POPUP_PRIORITY_NOTICE);
 }
 
 void popup_notice_hide(void)
@@ -312,7 +313,7 @@ bool popup_notice_visible(void)
 static void confirm_out_ready_cb(lv_anim_t *a)
 {
     (void)a;
-    page_popup_close(&s_confirm.base);
+    popup_manager_close(&s_confirm.base);
 }
 
 /* 从屏幕下方滑入到停靠位置 */
@@ -355,8 +356,9 @@ static void confirm_on_start(view_t *self)
     popup_confirm_ui_t *ui = confirm_ui(self);
     lv_obj_t *label;
 
+    /* 系统级弹窗画在 sys 层, 永远在应用级弹窗和页面之上 */
     /* 全屏遮罩: 半透明黑, 可点击以挡住底层页面(模态) */
-    ui->mask = lv_obj_create(lv_layer_top());
+    ui->mask = lv_obj_create(lv_layer_sys());
     lv_obj_set_size(ui->mask, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_pos(ui->mask, 0, 0);
     lv_obj_set_style_radius(ui->mask, 0, LV_PART_MAIN);
@@ -366,7 +368,7 @@ static void confirm_on_start(view_t *self)
     lv_obj_clear_flag(ui->mask, LV_OBJ_FLAG_SCROLLABLE);
 
     /* 底部面板 */
-    ui->panel = lv_obj_create(lv_layer_top());
+    ui->panel = lv_obj_create(lv_layer_sys());
     lv_obj_set_size(ui->panel, POPUP_CONFIRM_W, POPUP_CONFIRM_H);
     lv_obj_set_style_radius(ui->panel, 16, LV_PART_MAIN);
     lv_obj_set_style_bg_color(ui->panel, lv_color_make(0x2B, 0x2B, 0x2B), LV_PART_MAIN);
@@ -477,7 +479,7 @@ void popup_confirm_show(const char *desc,
         return;
     }
 
-    page_popup_open(&s_confirm.base, POPUP_PRIORITY_CONFIRM);
+    popup_manager_open(&s_confirm.base, POPUP_LEVEL_SYS, POPUP_PRIORITY_CONFIRM);
 }
 
 void popup_confirm_hide(void)

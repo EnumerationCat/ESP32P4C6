@@ -1,18 +1,18 @@
 /**
  * @file page_manager.h
- * @brief 页面管理器: ID注册表 + 挂起栈 + 弹窗优先级
+ * @brief 页面管理器: ID注册表 + 挂起栈
  *
  * 页面全部是 view_t(Framework/View/view.h), 状态用内嵌的 list_head_t 管理:
  *   ready  : 可见页面(栈, 栈顶=最后打开/最上层)
- *   paused : 被挂起的页面(打开新页/弹窗时, 原顶层页 on_pause 后移到这里)
- *   popup  : 弹窗, 按 link.value(=优先级) 升序, 表尾=优先级最高
+ *   paused : 被挂起的页面(打开新页时, 原顶层页 on_pause 后移到这里)
+ *
+ * 弹窗已拆分到 Framework/Manage/popup_manager.h, 由独立的两层优先队列管理:
+ * 打开/关闭弹窗不会暂停页面, manager_gopage() 只清空应用级弹窗。
  *
  * 生命周期约定:
- *  - page_open    -> 顶层页 on_pause 并挂起, 新页 on_start
- *  - page_close   -> 当前页 on_stop, 恢复挂起栈顶页 on_start
- *  - popup_open   -> 底层页 on_pause, 弹窗 on_start 后按优先级插入
- *  - popup_close  -> 弹窗 on_stop; 所有弹窗关闭后恢复底层页
- *  - tick         -> 只驱动"当前可见页"(最高优先级弹窗, 否则 ready栈顶) 的 on_update
+ *  - page_open  -> 顶层页 on_pause 并挂起, 新页 on_start
+ *  - page_close -> 当前页 on_stop, 恢复挂起栈顶页 on_start
+ *  - tick       -> 先刷新所有弹窗, 再驱动当前页面(ready栈顶)的 on_update
  *
  * 页面对象必须长期存活(静态/全局), 管理器只串指针, 不负责内存。
  */
@@ -34,10 +34,9 @@ extern "C" {
 /* 页面管理器(全局唯一实例g_page_manager) */
 typedef struct
 {
-    bool inited;                            /* 三条链表是否已初始化 */
+    bool inited;                            /* 两条链表是否已初始化 */
     list_t ready;                           /* 可见页面(栈) */
     list_t paused;                          /* 挂起页面(栈) */
-    list_t popup;                           /* 弹窗(按优先级升序) */
 
     view_t *registry[PAGE_REGISTRY_MAX];    /* 全部页面(按ID查找) */
     uint16_t reg_count;
@@ -85,7 +84,8 @@ void page_open(view_t *view);
 void page_close(view_t *view);
 
 /**
- * @brief       关闭当前顶层页(返回上一页)
+ * @brief       返回上一级: 有弹窗先关弹窗, 否则关闭当前顶层页
+ * @note        弹窗由 popup_manager 管理, 系统级优先, 其次应用级
  * @param       无
  * @retval      无
  */
@@ -93,37 +93,22 @@ void page_back(void);
 
 /**
  * @brief       切换到指定ID的页面(go page)
- * @note        只能在LVGL任务中调用; 切换前会关闭所有弹窗;
- *              目标页若在挂起栈中会被提到前台
+ * @note        只能在LVGL任务中调用; 切换前会关闭所有应用级弹窗
+ *              (系统级弹窗跨页面保留); 目标页若在挂起栈中会被提到前台
  * @param       id: 页面ID
  * @retval      true:切换成功(含已在目标页); false:ID未注册或状态异常
  */
 bool manager_gopage(uint16_t id);
 
 /**
- * @brief       打开弹窗(带优先级, 数值越大越靠上)
- * @param       view:     弹窗页面
- * @param       priority: 优先级(写入 link.value)
- * @retval      无
- */
-void page_popup_open(view_t *view, uint32_t priority);
-
-/**
- * @brief       关闭弹窗
- * @param       view: 弹窗页面
- * @retval      无
- */
-void page_popup_close(view_t *view);
-
-/**
- * @brief       当前可见页(最高优先级弹窗, 否则ready栈顶)
+ * @brief       当前页面(ready栈顶, 不含弹窗)
  * @param       无
- * @retval      页面指针; 无可见页返回NULL
+ * @retval      页面指针; 无页面返回NULL
  */
 view_t *page_current(void);
 
 /**
- * @brief       周期刷新: 只驱动当前可见页的 on_update
+ * @brief       周期刷新: 先刷新所有弹窗, 再驱动当前页面的 on_update
  * @note        在LVGL任务中与 lv_timer_handler() 一起调用
  * @param       无
  * @retval      无

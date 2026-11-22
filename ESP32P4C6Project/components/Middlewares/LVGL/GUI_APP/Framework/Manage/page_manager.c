@@ -1,11 +1,13 @@
 /**
  * @file page_manager.c
- * @brief 页面管理器实现: ready/paused/popup 三条侵入式链表 + ID注册表
+ * @brief 页面管理器实现: ready/paused 两条侵入式链表 + ID注册表
  *
  * 所有状态集中在全局唯一实例 g_page_manager 中。
+ * 弹窗由 Framework/Manage/popup_manager.c 独立管理, 这里只负责页面栈。
  */
 
 #include "page_manager.h"
+#include "popup_manager.h"
 #include "container_of.h"
 
 /* 全局唯一的页面管理器实例(静态零初始化) */
@@ -33,7 +35,6 @@ static void manager_ensure_init(page_manager_t *pm)
 
     list_init(&pm->ready);
     list_init(&pm->paused);
-    list_init(&pm->popup);
     pm->inited = true;
 }
 
@@ -189,12 +190,7 @@ void page_close(view_t *view)
     }
 
     list_delete(&view->link);
-
-    /* 弹窗还在时由 popup_close 负责恢复底层页 */
-    if (list_empty(&pm->popup))
-    {
-        resume_top_page(pm);
-    }
+    resume_top_page(pm);
 }
 
 void page_back(void)
@@ -203,9 +199,9 @@ void page_back(void)
 
     manager_ensure_init(pm);
 
-    if (!list_empty(&pm->popup))
+    /* 有弹窗先关弹窗(系统级优先, 再应用级) */
+    if (popup_manager_back() != NULL)
     {
-        page_popup_close(list_top(&pm->popup));
         return;
     }
 
@@ -225,18 +221,9 @@ bool manager_gopage(uint16_t id)
         return false;
     }
 
-    if (page_current() == view)
-    {
-        return true;
-    }
+    /* 切页前只收应用级弹窗(系统级弹窗跨页面保留) */
+    popup_manager_close_all(POPUP_LEVEL_APP);
 
-    /* 切页前收掉所有弹窗(从最高优先级开始) */
-    while (!list_empty(&pm->popup))
-    {
-        page_popup_close(list_top(&pm->popup));
-    }
-
-    /* 关闭弹窗可能已经把目标页恢复到前台 */
     if (page_current() == view)
     {
         return true;
@@ -259,63 +246,11 @@ bool manager_gopage(uint16_t id)
     return true;
 }
 
-void page_popup_open(view_t *view, uint32_t priority)
-{
-    page_manager_t *pm = &g_page_manager;
-
-    manager_ensure_init(pm);
-
-    if (view == NULL || view->link.owner != NULL)
-    {
-        return;
-    }
-
-    suspend_top_page(pm);
-
-    list_head_init(&view->link, priority);
-
-    if (view->on_start != NULL)
-    {
-        view->on_start(view);
-    }
-
-    list_add_sorted(&pm->popup, &view->link);
-}
-
-void page_popup_close(view_t *view)
-{
-    page_manager_t *pm = &g_page_manager;
-
-    manager_ensure_init(pm);
-
-    if (view == NULL || view->link.owner != &pm->popup)
-    {
-        return;
-    }
-
-    if (view->on_stop != NULL)
-    {
-        view->on_stop(view);
-    }
-
-    list_delete(&view->link);
-
-    if (list_empty(&pm->popup))
-    {
-        resume_top_page(pm);
-    }
-}
-
 view_t *page_current(void)
 {
     page_manager_t *pm = &g_page_manager;
 
     manager_ensure_init(pm);
-
-    if (!list_empty(&pm->popup))
-    {
-        return list_top(&pm->popup);
-    }
 
     return list_top(&pm->ready);
 }
@@ -327,7 +262,10 @@ void page_manager_tick(void)
 
     manager_ensure_init(pm);
 
-    top = page_current();
+    /* 弹窗独立刷新(压在下面的弹窗也要更新), 再刷新当前页面 */
+    popup_manager_tick();
+
+    top = list_top(&pm->ready);
     if (top != NULL && top->on_update != NULL)
     {
         top->on_update(top);
