@@ -10,6 +10,7 @@
  */
 
 #include "recorder_page.h"
+#include "recorder_play_page.h"
 #include "user_home_page.h"
 #include "page_manager.h"
 #include "view.h"
@@ -189,6 +190,13 @@ static void back_btn_event_cb(lv_event_t *e)
     manager_gopage(USER_HOME_PAGE_ID);
 }
 
+/* 进入录音回放列表(切页触发 on_pause, 正在录音会先停止保存) */
+static void list_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+    manager_gopage(RECORDER_PLAY_PAGE_ID);
+}
+
 /**********************
  *   页面生命周期
  **********************/
@@ -202,6 +210,8 @@ static void recorder_page_create(view_t *self)
     lv_obj_t *back_label;
     lv_obj_t *hint;
     lv_obj_t *label;
+    lv_obj_t *list_btn;
+    lv_obj_t *list_label;
 
     if (ui->screen != NULL)
     {
@@ -227,6 +237,17 @@ static void recorder_page_create(view_t *self)
     lv_obj_center(back_label);
 
     lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    /* 录音回放列表按钮(右上角) */
+    list_btn = lv_btn_create(ui->screen);
+    lv_obj_set_size(list_btn, 64, 36);
+    lv_obj_align(list_btn, LV_ALIGN_TOP_RIGHT, -8, 8);
+
+    list_label = lv_label_create(list_btn);
+    lv_label_set_text(list_label, "LIST");
+    lv_obj_center(list_label);
+
+    lv_obj_add_event_cb(list_btn, list_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
     /* 录音时长 */
     ui->time_label = lv_label_create(ui->screen);

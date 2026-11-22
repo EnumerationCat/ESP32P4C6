@@ -33,4 +33,14 @@ uint32_t recorder_elapsed_sec(void);
 /* 当前/最近一次录音的文件名(仅文件名, 如 "REC_00000.wav"); 未录音过返回空串 */
 const char *recorder_current_file_name(void);
 
+/* 异步播放一个录音WAV文件(16bit PCM); 正在录音/播放时返回 ESP_ERR_INVALID_STATE
+ * 返回 ESP_OK 表示播放任务已启动, 用 recorder_is_playing() 轮询状态 */
+esp_err_t recorder_play(const char *path);
+
+/* 停止播放: 置停止标志并等待播放任务退出; 未在播放时直接返回 ESP_OK */
+esp_err_t recorder_play_stop(void);
+
+/* 是否正在播放 */
+bool recorder_is_playing(void);
+
 #endif /* __RECORDER_H */

@@ -15,6 +15,7 @@
 #include "video_page.h"
 #include "usb_disk_page.h"
 #include "recorder_page.h"
+#include "recorder_play_page.h"
 #include "videoplay.h"
 #include "page_manager.h"
 #include "wifi_manager.h"
@@ -135,6 +136,7 @@ void app_main(void)
     video_page_init();          /* 注册视频页: 列出 /User/VIDEO 下的 AVI 并播放 */
     usb_disk_page_init();       /* 注册U盘模式页: SD卡作为U盘交给PC读写 */
     recorder_page_init();       /* 注册录音页: 触摸录音并保存到 /User/RECORDER 目录 */
+    recorder_play_page_init();  /* 注册录音回放页: 列出 /User/RECORDER 下的 WAV 并播放 */
 
     sdmmc_init();               /* 挂载SD卡: LVGL文件系统盘符 D: -> /User */
     flash_fat_init();           /* 挂载Flash FAT分区: LVGL文件系统盘符 C: -> /Factory */
