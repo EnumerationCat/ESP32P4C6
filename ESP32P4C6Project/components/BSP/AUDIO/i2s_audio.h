@@ -34,5 +34,6 @@ esp_err_t i2s_audio_setup_for_samplerate(uint32_t samplerate, uint32_t audio_chu
 esp_err_t i2s_trx_start(void);                             /* 启动I2S收发 */
 void i2s_trx_stop(void);                                   /* 停止I2S收发 */
 size_t i2s_tx_write(uint8_t *buffer, uint32_t frame_size); /* 阻塞发送音频数据 */
+size_t i2s_rx_read(uint8_t *buffer, uint32_t frame_size);  /* 阻塞接收音频数据(录音) */
 
 #endif

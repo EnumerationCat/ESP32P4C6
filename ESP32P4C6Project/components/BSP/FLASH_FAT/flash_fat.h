@@ -9,7 +9,7 @@
 /* Flash FAT分区(分区表: vfs, data, fat, 0x200000, 10MB) */
 #define FLASH_FAT_PARTITION_LABEL   "vfs"
 
-/* 挂载点(不能与SDMMC的MOUNT_POINT重名, 否则同时包含两个头文件会宏重定义) */
+/* 挂载点 */
 #define FACTORY_MOUNT_POINT         "/Factory"
 
 /* Flash FAT挂载状态 */

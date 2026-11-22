@@ -10,6 +10,7 @@
 #include "shell_page.h"
 #include "video_page.h"
 #include "usb_disk_page.h"
+#include "recorder_page.h"
 #include "page_manager.h"
 #include "view.h"
 #include "container_of.h"
@@ -100,6 +101,14 @@ static void usb_disk_btn_event_cb(lv_event_t *e)
     manager_gopage(USB_DISK_PAGE_ID);
 }
 
+/* 录音页按钮事件回调 */
+static void recorder_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+
+    manager_gopage(RECORDER_PAGE_ID);
+}
+
 /* 创建主界面控件(幂等) */
 static void home_init(view_t *self)
 {
@@ -160,6 +169,17 @@ static void home_init(view_t *self)
     lv_obj_center(usb_label);
 
     lv_obj_add_event_cb(usb_btn, usb_disk_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    /* ==================== 录音页按钮 ==================== */
+    lv_obj_t *recorder_btn = lv_btn_create(object);
+    lv_obj_set_size(recorder_btn, 60, 60);
+    lv_obj_set_pos(recorder_btn, 90, 290);
+
+    lv_obj_t *recorder_label = lv_label_create(recorder_btn);
+    lv_label_set_text(recorder_label, "REC");
+    lv_obj_center(recorder_label);
+
+    lv_obj_add_event_cb(recorder_btn, recorder_btn_event_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* 销毁主界面控件 */

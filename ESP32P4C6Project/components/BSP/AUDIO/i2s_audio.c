@@ -299,3 +299,30 @@ size_t i2s_tx_write(uint8_t *buffer, uint32_t frame_size)
 
     return bytes_written;
 }
+
+/**
+ * @brief       阻塞接收一段音频数据(录音)
+ * @param       buffer    : 数据首地址
+ * @param       frame_size: 期望读取的字节数
+ * @retval      实际读取的字节数(超时/失败返回0)
+ */
+size_t i2s_rx_read(uint8_t *buffer, uint32_t frame_size)
+{
+    size_t bytes_read = 0;
+    esp_err_t ret;
+
+    if (rx_handle == NULL || buffer == NULL || frame_size == 0)
+    {
+        return 0;
+    }
+
+    ret = i2s_channel_read(rx_handle, buffer, frame_size, &bytes_read, pdMS_TO_TICKS(1000));
+
+    /* 超时或读取失败时返回0, 由调用者决定是否继续; 这里不打日志避免刷屏 */
+    if (ret != ESP_OK)
+    {
+        return 0;
+    }
+
+    return bytes_read;
+}

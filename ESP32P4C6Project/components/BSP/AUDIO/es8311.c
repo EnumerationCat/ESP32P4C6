@@ -128,6 +128,12 @@ esp_err_t es8311_init(i2c_master_bus_handle_t bus_handle)
         ESP_LOGW(TAG, "set output volume failed");
     }
 
+    /* 麦克风输入增益: 与参考录音例程一致的 30dB, 否则录音音量偏小 */
+    if (esp_codec_dev_set_in_gain(s_codec, 30) != ESP_CODEC_DEV_OK)
+    {
+        ESP_LOGW(TAG, "set input gain failed");
+    }
+
     s_ready = true;
     ESP_LOGI(TAG, "codec ready (16kHz, stereo, 16bit)");
     return ESP_OK;
