@@ -12,7 +12,7 @@
 #include "st7102.h"
 
 const char *st7102_tag = "st7102";
-i2c_master_dev_handle_t st7102_handle = NULL;   /* ST7102设备句柄(MYIIC硬件I2C总线) */
+i2c_master_dev_handle_t st7102_handle = NULL;   /* ST7102设备句柄(I2C总线) */
 uint8_t g_st7102_tnum = 2;
 
 /* 向ST7102写入数据 */
@@ -72,10 +72,10 @@ esp_err_t st7102_init(void)
     uint8_t temp[5];
     uint8_t i;
 
-    /* 初始化MYIIC硬件I2C */
+    /* 初始化I2C总线 */
     if (bus_handle == NULL)
     {
-        ESP_ERROR_CHECK(myiic_init());
+        ESP_ERROR_CHECK(i2c_bus_init());
     }
 
     i2c_device_config_t st7102_i2c_dev_conf = {

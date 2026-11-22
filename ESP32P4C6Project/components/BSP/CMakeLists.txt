@@ -1,29 +1,32 @@
 set(src_dirs
             LED
             LCD
-            MYIIC
+            I2C_BUS
             TOUCH
             MIPI_CAM
             SDMMC
             FLASH_FAT
             UART
             VIDEO_PLAY
+            AUDIO
             USB)
 
 set(include_dirs
             LED
             LCD
-            MYIIC
+            I2C_BUS
             TOUCH
             MIPI_CAM
             SDMMC
             FLASH_FAT
             UART
             VIDEO_PLAY
+            AUDIO
             USB)
 
 set(requires
             esp_driver_gpio
+            esp_driver_i2s
             esp_driver_jpeg
             esp_lcd
             esp_common
@@ -35,6 +38,7 @@ set(requires
             esp_mm
             esp_timer
             esp_tinyusb
+            esp_codec_dev
             fatfs
             sdmmc
             vfs

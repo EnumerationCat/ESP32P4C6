@@ -1,14 +1,14 @@
-#include "myiic.h"
+#include "i2c_bus.h"
 
 
 i2c_master_bus_handle_t bus_handle;     /* 总线句柄 */
 
 /**
- * @brief       初始化MYIIC
+ * @brief       初始化I2C总线
  * @param       无
  * @retval      ESP_OK:初始化成功
  */
-esp_err_t myiic_init(void)
+esp_err_t i2c_bus_init(void)
 {
     i2c_master_bus_config_t i2c_bus_config = {
         .clk_source                     = I2C_CLK_SRC_DEFAULT,  /* 时钟源 */

@@ -62,10 +62,10 @@ esp_err_t gt9xxx_init(void)
 {
     uint8_t temp[5];
 
-    /* 未调用myiic_init初始化IIC */
+    /* 未调用i2c_bus_init初始化I2C */
     if (bus_handle == NULL)
     {
-        ESP_ERROR_CHECK(myiic_init());
+        ESP_ERROR_CHECK(i2c_bus_init());
     }
 
     i2c_device_config_t gt9xxx_i2c_dev_conf = {

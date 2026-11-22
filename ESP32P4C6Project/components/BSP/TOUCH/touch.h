@@ -4,7 +4,7 @@
 #include "lcd.h"
 #include "gt9xxx.h"
 #include "st7102.h"
-#include "myiic.h"
+#include "i2c_bus.h"
 
 
 #define TP_PRES_DOWN    0x8000  /* 触屏被按下 */

@@ -1,8 +1,6 @@
 /**
  * @file avi.c
  * @brief AVI 容器解析(MJPEG + PCM)
- *
- * 移植自慧勤智远 26_video_player 例程。
  */
 
 #include "avi.h"

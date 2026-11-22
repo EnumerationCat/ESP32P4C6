@@ -7,7 +7,7 @@
 #include "esp_log.h"
 #include "touch.h"
 #include "string.h"
-#include "myiic.h"
+#include "i2c_bus.h"
 
 
 /* 触摸芯片引脚相关定义 */

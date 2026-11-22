@@ -2,9 +2,9 @@
  * @file videoplay.c
  * @brief AVI(MJPEG) 视频播放器实现
  *
- * 播放流程参考慧勤智远 26_video_player 例程:
+ * 播放流程:
  *   - 读入文件头, avi_init 解析出分辨率/帧间隔/movi 位置;
- *   - 跳到第一帧数据, 逐块读取: 'dc' 帧解码显示, 'wb' 帧跳过;
+ *   - 跳到第一帧数据, 逐块读取: 'dc' 帧解码显示, 'wb' 帧送 I2S 播放;
  *   - esp_timer 周期定时器控制帧间隔;
  *   - 触摸屏幕任意位置退出。
  */
@@ -14,6 +14,8 @@
 #include "mjpeg.h"
 #include "lcd.h"
 #include "touch.h"
+#include "i2s_audio.h"
+#include "es8311.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -117,6 +119,7 @@ static void videoplay_task(void *arg)
     uint32_t offset;
     uint32_t period_us;
     int64_t guard_until;
+    bool audio_started = false;
     bool ok = false;
 
     /* 读取缓冲放 PSRAM: 单帧上限 260KB, 内部 RAM 放不下 */
@@ -178,6 +181,27 @@ static void videoplay_task(void *arg)
         goto cleanup;
     }
 
+    /* AVI 带音轨且编解码器可用时, 按文件采样率重建 I2S 通道并启动 */
+    if (g_avix.SampleRate != 0 && es8311_ready())
+    {
+        esp_err_t aret = i2s_audio_setup_for_samplerate(g_avix.SampleRate, g_avix.AudioBufSize);
+
+        if (aret == ESP_OK)
+        {
+            aret = i2s_trx_start();
+        }
+
+        if (aret == ESP_OK)
+        {
+            audio_started = true;
+            ESP_LOGI(TAG, "audio %luHz %uch", (unsigned long)g_avix.SampleRate, g_avix.Channels);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "audio start failed: %s", esp_err_to_name(aret));
+        }
+    }
+
     guard_until = esp_timer_get_time() + FRAME_GUARD_US;
     ESP_LOGI(TAG, "playing %s", s_path);
 
@@ -209,7 +233,11 @@ static void videoplay_task(void *arg)
             }
             s_frame_ready = false;
         }
-        /* 音频块直接丢弃(本板无音频输出) */
+        else if (g_avix.StreamID == AVI_AUDS_FLAG && audio_started)
+        {
+            /* 阻塞写入, 耗时等于音频块时长, 顺便给视频帧配速 */
+            i2s_tx_write(framebuf, g_avix.StreamSize);
+        }
 
         /* 触摸退出(启动后短暂屏蔽, 避免播放按钮那一次按压立即生效) */
         if (esp_timer_get_time() > guard_until && touch_pressed())
@@ -242,6 +270,11 @@ static void videoplay_task(void *arg)
 
 cleanup:
     frame_timer_stop();
+
+    if (audio_started)
+    {
+        i2s_trx_stop();     /* 通道保留给下次播放按新采样率重建 */
+    }
 
     if (f != NULL)
     {

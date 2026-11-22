@@ -2,7 +2,7 @@
  * @file avi.h
  * @brief AVI 容器解析(MJPEG + PCM)
  *
- * 移植自慧勤智远 26_video_player 例程, 只保留解析部分:
+ * 只保留解析部分:
  * 读取 RIFF/AVI/hdrl/strl/strf 头, 找到 movi 块并给出视频帧/音频帧标记。
  */
 

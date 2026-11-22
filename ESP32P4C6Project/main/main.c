@@ -21,6 +21,8 @@
 #include "onenet_mqtt.h"
 #include "onenet_dm.h"
 #include "mipi_cam.h"
+#include "i2s_audio.h"
+#include "es8311.h"
 #include "sdmmc.h"
 #include "flash_fat.h"
 #include "usb_hid_mouse.h"
@@ -151,6 +153,21 @@ void app_main(void)
         ESP_LOGW(TAG, "mipi camera init failed");
     }
     user_home_page_set_camera_cb(camera_btn_handler);
+
+    /* 音频: I2S 直连 ES8311, 控制口复用摄像头 SCCB 的 I2C 总线;
+     * 初始化失败只影响视频声音, 不阻塞其它功能 */
+    if (i2s_audio_init() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "i2s init failed");
+    }
+    else if (es8311_init(mipi_cam_sccb_bus()) != ESP_OK)
+    {
+        ESP_LOGW(TAG, "es8311 init failed");
+    }
+    else
+    {
+        ESP_LOGI(TAG, "audio codec ready");
+    }
 
     /* WiFi初始化并连接热点 */
     onenet_dm_init();

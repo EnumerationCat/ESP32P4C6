@@ -25,6 +25,43 @@ static esp_err_t camera_queue_all_buffers(void);
 static bool touch_pressed(void);
 static void camera_display_frame(int index, void *draw_buffer);
 
+static i2c_master_bus_handle_t s_sccb_bus = NULL;   /* 摄像头SCCB总线(ES8311共用) */
+
+/**
+ * @brief       获取摄像头SCCB的I2C总线(首次调用时创建)
+ * @note        摄像头与ES8311共用 GPIO28/29 这组 I2C, 所以由本模块统一
+ *              创建总线, 再分别交给 esp_video(SCCB) 和 ES8311 使用.
+ *              参数与Kconfig保持一致: 端口1, SCL=29, SDA=28, 100kHz.
+ * @param       无
+ * @retval      I2C总线句柄; 创建失败返回NULL
+ */
+i2c_master_bus_handle_t mipi_cam_sccb_bus(void)
+{
+    if (s_sccb_bus != NULL)
+    {
+        return s_sccb_bus;
+    }
+
+    i2c_master_bus_config_t bus_cfg = {
+        .i2c_port    = CONFIG_EXAMPLE_MIPI_CSI_SCCB_I2C_PORT,
+        .sda_io_num  = CONFIG_EXAMPLE_MIPI_CSI_SCCB_I2C_SDA_PIN,
+        .scl_io_num  = CONFIG_EXAMPLE_MIPI_CSI_SCCB_I2C_SCL_PIN,
+        .clk_source  = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+
+    esp_err_t ret = i2c_new_master_bus(&bus_cfg, &s_sccb_bus);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(mipi_cam_tag, "create sccb i2c bus failed: %s", esp_err_to_name(ret));
+        s_sccb_bus = NULL;
+        return NULL;
+    }
+
+    return s_sccb_bus;
+}
+
 /**
  * @brief       mipi_cam初始化
  * @note        只完成摄像头硬件和视频接口初始化, 不显示画面.
@@ -43,9 +80,9 @@ esp_err_t mipi_cam_init(void)
 
     mipi_dev_bsp_enable_dsi_phy_power();    /* 配置MIPI设备电源 */
 
-    /* SCCB与触摸不共总线: 摄像头I2C在GPIO28/29, 触摸I2C在GPIO16/17.
-     * 传NULL让esp_video按Kconfig(端口1, SCL=29, SDA=28)自行创建SCCB总线 */
-    ret = app_video_main(NULL);             /* 初始化摄像头硬件和软件接口 */
+    /* 摄像头与ES8311共用GPIO28/29的I2C总线, 由本模块创建后交给esp_video,
+     * 这样音频初始化时可以直接复用同一个总线句柄 */
+    ret = app_video_main(mipi_cam_sccb_bus());  /* 初始化摄像头硬件和软件接口 */
     if (ret != ESP_OK)
     {
         ESP_LOGE(mipi_cam_tag, "video main init failed with error 0x%x", ret);

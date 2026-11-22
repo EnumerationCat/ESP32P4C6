@@ -8,7 +8,7 @@
 #include "esp_log.h"
 #include "touch.h"
 #include "string.h"
-#include "myiic.h"
+#include "i2c_bus.h"
 
 /* 触摸芯片引脚相关定义 */
 #define GT9XXX_INT_GPIO_PIN             GPIO_NUM_15

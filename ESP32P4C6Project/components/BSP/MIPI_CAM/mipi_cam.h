@@ -5,8 +5,9 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <stdbool.h>
+#include "driver/i2c_master.h"
 #include "app_video.h"
-#include "myiic.h"
+#include "i2c_bus.h"
 #include "driver/ppa.h"
 #include "esp_timer.h"
 #include "lcd.h"
@@ -23,5 +24,6 @@
 esp_err_t mipi_cam_init(void);              /* mipi_cam初始化(只初始化硬件,不显示) */
 esp_err_t mipi_cam_preview_start(void);     /* 请求全屏预览,由摄像头任务接管LCD */
 bool mipi_cam_preview_active(void);         /* 预览是否进行中(LVGL据此暂停刷新) */
+i2c_master_bus_handle_t mipi_cam_sccb_bus(void); /* 摄像头SCCB的I2C总线(与ES8311共用),首次调用时创建 */
 
 #endif

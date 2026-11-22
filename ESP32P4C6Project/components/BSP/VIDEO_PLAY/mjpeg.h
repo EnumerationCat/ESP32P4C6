@@ -2,7 +2,7 @@
  * @file mjpeg.h
  * @brief MJPEG 帧解码 + 全屏显示(硬件 JPEG 解码器 + 最近邻缩放)
  *
- * 移植自慧勤智远 26_video_player 例程, 改为全屏黑边居中显示, 不预留 UI 区域。
+ * 全屏黑边居中显示, 不预留 UI 区域。
  */
 
 #ifndef __MJPEG_H
