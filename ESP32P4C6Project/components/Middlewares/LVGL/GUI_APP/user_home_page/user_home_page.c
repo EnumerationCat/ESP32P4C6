@@ -11,6 +11,7 @@
 #include "video_page.h"
 #include "usb_disk_page.h"
 #include "recorder_page.h"
+#include "wifi_page.h"
 #include "page_manager.h"
 #include "view.h"
 #include "container_of.h"
@@ -109,6 +110,14 @@ static void recorder_btn_event_cb(lv_event_t *e)
     manager_gopage(RECORDER_PAGE_ID);
 }
 
+/* WiFi连接页按钮事件回调 */
+static void wifi_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+
+    manager_gopage(WIFI_PAGE_ID);
+}
+
 /* 创建主界面控件(幂等) */
 static void home_init(view_t *self)
 {
@@ -180,6 +189,17 @@ static void home_init(view_t *self)
     lv_obj_center(recorder_label);
 
     lv_obj_add_event_cb(recorder_btn, recorder_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    /* ==================== WiFi连接页按钮 ==================== */
+    lv_obj_t *wifi_btn = lv_btn_create(object);
+    lv_obj_set_size(wifi_btn, 60, 60);
+    lv_obj_set_pos(wifi_btn, 190, 290);
+
+    lv_obj_t *wifi_label = lv_label_create(wifi_btn);
+    lv_label_set_text(wifi_label, "WIFI");
+    lv_obj_center(wifi_label);
+
+    lv_obj_add_event_cb(wifi_btn, wifi_btn_event_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* 销毁主界面控件 */

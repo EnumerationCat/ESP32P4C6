@@ -1,6 +1,5 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "touch.h"
@@ -16,10 +15,10 @@
 #include "usb_disk_page.h"
 #include "recorder_page.h"
 #include "recorder_play_page.h"
+#include "wifi_page.h"
 #include "videoplay.h"
 #include "page_manager.h"
 #include "wifi_manager.h"
-#include "ap_wifi.h"
 #include "onenet_mqtt.h"
 #include "onenet_dm.h"
 #include "mipi_cam.h"
@@ -33,32 +32,6 @@
 #include <string.h>
 
 static const char *TAG = "MAIN";
-
-/* 要连接的Wi-Fi，改成自己的 */
-#define WIFI_SSID       "Wi-Fi"
-#define WIFI_PASSWORD   "12345678"
-
-#define WIFI_CONNECTED_BIT  BIT0
-static EventGroupHandle_t wifi_ev = NULL;
-
-/**
- * @brief       WiFi连接状态回调
- * @param       state: 连接状态
- * @retval      无
- */
-static void wifi_state_handler(WIFI_STATE state)
-{
-    if (state == WIFI_STATE_CONNECTED)
-    {
-        ESP_LOGI(TAG, "WIFI_STATE_CONNECTED");
-        xEventGroupSetBits(wifi_ev, WIFI_CONNECTED_BIT);
-    }
-    else if (state == WIFI_STATE_DISCONNECTED)
-    {
-        ESP_LOGI(TAG, "WIFI_STATE_DISCONNECTED");
-        xEventGroupClearBits(wifi_ev, WIFI_CONNECTED_BIT);
-    }
-}
 
 /**
  * @brief       相机按钮回调(用户界面无返回值)
@@ -137,6 +110,7 @@ void app_main(void)
     usb_disk_page_init();       /* 注册U盘模式页: SD卡作为U盘交给PC读写 */
     recorder_page_init();       /* 注册录音页: 触摸录音并保存到 /User/RECORDER 目录 */
     recorder_play_page_init();  /* 注册录音回放页: 列出 /User/RECORDER 下的 WAV 并播放 */
+    wifi_page_init();           /* 注册WiFi连接页: 下拉选择热点 + 密码键盘 */
 
     sdmmc_init();               /* 挂载SD卡: LVGL文件系统盘符 D: -> /User */
     flash_fat_init();           /* 挂载Flash FAT分区: LVGL文件系统盘符 C: -> /Factory */
@@ -173,22 +147,15 @@ void app_main(void)
         ESP_LOGI(TAG, "audio codec ready");
     }
 
-    /* WiFi初始化并连接热点 */
+    /* WiFi协议栈由WiFi页面模块初始化; 连接哪个热点也在WiFi页面里选择 */
     onenet_dm_init();
-    wifi_ev = xEventGroupCreate();
-    ap_wifi_init(wifi_state_handler);
-    wifi_manager_connect(WIFI_SSID, WIFI_PASSWORD);
 
     /* 主任务栈只有3584字节, LVGL放到独立任务中运行 */
     xTaskCreate(lvgl_task, "lvgl", 8 * 1024, NULL, 4, NULL);
     /* WiFi连上后启动OneNET；断网时停止，重连后再次启动。
-     * 注意事件位要用 clear-on-exit，否则连上后等待会立即返回形成忙等循环；
      * onenet_running 用于保证只创建一次MQTT客户端，避免重复启动耗尽内存 */
     while (1)
     {
-        xEventGroupWaitBits(wifi_ev, WIFI_CONNECTED_BIT, pdTRUE, pdFALSE,
-                            pdMS_TO_TICKS(3000));
-
         if (wifi_manager_is_connect())
         {
             if (!onenet_running && onenet_start() == ESP_OK)
@@ -203,5 +170,7 @@ void app_main(void)
             onenet_running = false;
             ESP_LOGW(TAG, "wifi lost, onenet stopped");
         }
+
+        vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }

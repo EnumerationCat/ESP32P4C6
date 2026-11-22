@@ -21,6 +21,7 @@ typedef void(*p_wifi_scan_cb)(int num, wifi_ap_record_t *ap_records);
 
 void wifi_manager_init(p_wifi_state_cb f);
 void wifi_manager_connect(const char *ssid, const char *password);
+void wifi_manager_disconnect(void);
 esp_err_t wifi_manager_ap(void);
 esp_err_t wifi_manager_scan(p_wifi_scan_cb f);
 bool wifi_manager_is_connect(void);

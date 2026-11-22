@@ -292,6 +292,7 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				LVGL/GUI_APP/usb_disk_page/usb_disk_page.c
 				LVGL/GUI_APP/recorder_page/recorder_page.c
 				LVGL/GUI_APP/recorder_play_page/recorder_play_page.c
+				LVGL/GUI_APP/wifi_page/wifi_page.c
 				LVGL/GUI_APP/Framework/Manage/list_head.c
 				LVGL/GUI_APP/Framework/Manage/page_manager.c
 				LVGL/GUI_APP/Framework/shell_core.c
@@ -337,6 +338,7 @@ set(include_dirs wifi_manager
 				 LVGL/GUI_APP/usb_disk_page
 				 LVGL/GUI_APP/recorder_page
 				 LVGL/GUI_APP/recorder_play_page
+				 LVGL/GUI_APP/wifi_page
 
 
 )

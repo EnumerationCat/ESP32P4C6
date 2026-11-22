@@ -12,28 +12,29 @@
 #include "freertos/semphr.h"
 
 
-static const char *ap_ssid_name = "ESP32-AP";
-static const char *ap_password = "12345678";
- 
-
-
-static p_wifi_state_cb wifi_callback = NULL;
-
-
-
 #define TAG "wifi_manager"
 #define MAX_CONNECT_RETRY  10
-static int sta_connect_cnt = 0; //重连的次数
 
+/* WiFi运行上下文: 连接状态 + 回调 + 网卡句柄 + 扫描信号量 + AP配网凭据 */
+typedef struct
+{
+    p_wifi_state_cb wifi_callback;      /* STA连接状态回调 */
+    bool is_sta_connected;              /* 当前STA已连接(拿到IP) */
+    int sta_connect_cnt;                /* 断线重连次数 */
+    bool manual_disconnect;             /* 手动断开: 不再自动重连 */
+    SemaphoreHandle_t scan_semaphore;   /* 扫描互斥(二值信号量) */
 
-static SemaphoreHandle_t scan_semaphore = NULL;
+    esp_netif_t *esp_netif_ap;          /* AP配网网卡 */
+    esp_netif_t *esp_netif_sta;         /* STA网卡 */
 
+    const char *ap_ssid_name;           /* AP配网热点名 */
+    const char *ap_password;            /* AP配网热点密码 */
+} wifi_ctx_t;
 
-static esp_netif_t *esp_netif_ap = NULL;
-static esp_netif_t *esp_netif_sta = NULL;
-
-//当前sta连接状态
-static bool is_sta_connected = false;
+static wifi_ctx_t s_wifi = {
+    .ap_ssid_name = "ESP32-AP",
+    .ap_password  = "12345678",
+};
 
 
 
@@ -46,25 +47,23 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         {
             case WIFI_EVENT_STA_START:
             {
-				wifi_mode_t mode;
-				esp_wifi_get_mode(&mode);
-				if(mode == WIFI_MODE_STA)
-					esp_wifi_connect();         //启动WIFI连接
+				/* 不自动连接: 开机先保持未联网, 由WiFi页面选择热点后
+				 * 调用 wifi_manager_connect() 才真正连接 */
 				break;
         	}
             case WIFI_EVENT_STA_DISCONNECTED:
 
-				if(is_sta_connected)
+				if(s_wifi.is_sta_connected)
 				{
 					
-					if(wifi_callback)
+					if(s_wifi.wifi_callback)
 					{
-						wifi_callback(WIFI_STATE_DISCONNECTED);
+						s_wifi.wifi_callback(WIFI_STATE_DISCONNECTED);
 					}
-					is_sta_connected = false;
+					s_wifi.is_sta_connected = false;
 
 				}
-                if(sta_connect_cnt < MAX_CONNECT_RETRY)
+                if(!s_wifi.manual_disconnect && s_wifi.sta_connect_cnt < MAX_CONNECT_RETRY)
                 {
 					wifi_mode_t mode;
                 	esp_wifi_get_mode(&mode);
@@ -73,8 +72,8 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 						esp_wifi_connect();
 
 					}
-                    
-                    sta_connect_cnt++;
+
+                    s_wifi.sta_connect_cnt++;
                 }
 				ESP_LOGI(TAG,"connect to the AP fail,retry now");
                 break;
@@ -106,10 +105,10 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         if(event_id == IP_EVENT_STA_GOT_IP)
 		{
 			ESP_LOGI(TAG,"Get ip addr");
-			is_sta_connected = true;
-			if(wifi_callback)
+			s_wifi.is_sta_connected = true;
+			if(s_wifi.wifi_callback)
 			{
-				wifi_callback(WIFI_STATE_CONNECTED);
+				s_wifi.wifi_callback(WIFI_STATE_CONNECTED);
 			}
 		}
 		
@@ -123,8 +122,8 @@ void wifi_manager_init(p_wifi_state_cb f)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    esp_netif_sta = esp_netif_create_default_wifi_sta();
-	esp_netif_ap = esp_netif_create_default_wifi_ap();
+    s_wifi.esp_netif_sta = esp_netif_create_default_wifi_sta();
+	s_wifi.esp_netif_ap = esp_netif_create_default_wifi_ap();
 
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -142,9 +141,9 @@ void wifi_manager_init(p_wifi_state_cb f)
                                                         NULL));
 
 
-	wifi_callback = f;
-	scan_semaphore = xSemaphoreCreateBinary();
-	xSemaphoreGive(scan_semaphore);
+	s_wifi.wifi_callback = f;
+	s_wifi.scan_semaphore = xSemaphoreCreateBinary();
+	xSemaphoreGive(s_wifi.scan_semaphore);
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -164,17 +163,38 @@ void wifi_manager_connect(const char* ssid,const char* password)
     snprintf((char*)wifi_config.sta.ssid,31,"%s",ssid);
     snprintf((char*)wifi_config.sta.password,63,"%s",password);
 
+    s_wifi.manual_disconnect = false;      /* 手动连接时恢复自动重连 */
+	s_wifi.sta_connect_cnt = 0;
+
     wifi_mode_t mode;
     esp_wifi_get_mode(&mode);
-    if(mode != WIFI_MODE_STA)
+    bool need_start = (mode != WIFI_MODE_STA);
+    if(need_start)
     {
         esp_wifi_stop();
         esp_wifi_set_mode(WIFI_MODE_STA);
     }
 
-	sta_connect_cnt = 0;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
-    esp_wifi_start();
+    if(need_start)
+    {
+        esp_wifi_start();
+    }
+
+    /* 已启动的WiFi只改配置不会主动重连, 这里显式断开旧连接再连新热点 */
+    esp_wifi_disconnect();
+    esp_wifi_connect();
+}
+
+/** 断开当前热点并停止自动重连(之后可用 wifi_manager_connect 重新连接)
+ * @param 无
+ * @return 无
+*/
+void wifi_manager_disconnect(void)
+{
+    s_wifi.manual_disconnect = true;
+    esp_wifi_disconnect();
+    s_wifi.is_sta_connected = false;
 }
 
 
@@ -192,6 +212,7 @@ esp_err_t wifi_manager_ap(void)
 	}
 
 
+	s_wifi.manual_disconnect = true;
 	esp_wifi_disconnect();
 	esp_wifi_stop();
 	esp_wifi_set_mode(WIFI_MODE_APSTA);
@@ -207,9 +228,9 @@ esp_err_t wifi_manager_ap(void)
 		}
 	};
 
-	snprintf((char *)wifi_config.ap.ssid,32,"%s",ap_ssid_name);
-	wifi_config.ap.ssid_len = strlen(ap_ssid_name);
-	snprintf((char *)wifi_config.ap.password,63,"%s",ap_password);
+	snprintf((char *)wifi_config.ap.ssid,32,"%s",s_wifi.ap_ssid_name);
+	wifi_config.ap.ssid_len = strlen(s_wifi.ap_ssid_name);
+	snprintf((char *)wifi_config.ap.password,63,"%s",s_wifi.ap_password);
 	esp_wifi_set_config(WIFI_IF_AP,&wifi_config);
 
 	esp_netif_ip_info_t ipInfo;
@@ -217,9 +238,9 @@ esp_err_t wifi_manager_ap(void)
 	IP4_ADDR(&ipInfo.gw,192,168,100,1);       //网关
 	IP4_ADDR(&ipInfo.netmask,255,255,255,0);  //子网掩码
 
-	esp_netif_dhcps_stop(esp_netif_ap);
-	esp_netif_set_ip_info(esp_netif_ap,&ipInfo);
-	esp_netif_dhcps_start(esp_netif_ap);
+	esp_netif_dhcps_stop(s_wifi.esp_netif_ap);
+	esp_netif_set_ip_info(s_wifi.esp_netif_ap,&ipInfo);
+	esp_netif_dhcps_start(s_wifi.esp_netif_ap);
 
 	esp_wifi_start();
 	return ESP_OK;
@@ -243,14 +264,14 @@ static void wifi_scan_task(void *param)
 	}
 
 	free(ap_list);
-	xSemaphoreGive(scan_semaphore);
+	xSemaphoreGive(s_wifi.scan_semaphore);
 	vTaskDelete(NULL);
 
 }
 
 esp_err_t wifi_manager_scan(p_wifi_scan_cb f)
 {
-	if(pdTRUE == xSemaphoreTake(scan_semaphore,0))
+	if(pdTRUE == xSemaphoreTake(s_wifi.scan_semaphore,0))
 	{
 		esp_wifi_clear_ap_list();
 		return xTaskCreatePinnedToCore(wifi_scan_task,"wifi_scan",8192,f,3,NULL,1);
@@ -270,5 +291,5 @@ esp_err_t wifi_manager_scan(p_wifi_scan_cb f)
 */
 bool wifi_manager_is_connect(void)
 {
-    return is_sta_connected;
+    return s_wifi.is_sta_connected;
 }
