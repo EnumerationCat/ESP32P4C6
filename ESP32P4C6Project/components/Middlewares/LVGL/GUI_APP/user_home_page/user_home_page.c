@@ -138,7 +138,7 @@ static void home_init(view_t *self)
     /* ==================== 相机启动按钮 ==================== */
     lv_obj_t *camera_btn = lv_btn_create(object);
     lv_obj_set_size(camera_btn, 60, 60);
-    lv_obj_set_pos(camera_btn, 90, 130);
+    lv_obj_set_pos(camera_btn, 35, 130);
 
     lv_obj_t *camera_label = lv_label_create(camera_btn);
     lv_label_set_text(camera_label, "CAM");
@@ -149,7 +149,7 @@ static void home_init(view_t *self)
     /* ==================== 命令行页面按钮 ==================== */
     lv_obj_t *shell_btn = lv_btn_create(object);
     lv_obj_set_size(shell_btn, 60, 60);
-    lv_obj_set_pos(shell_btn, 190, 130);
+    lv_obj_set_pos(shell_btn, 130, 130);
 
     lv_obj_t *shell_label = lv_label_create(shell_btn);
     lv_label_set_text(shell_label, "shell");
@@ -160,7 +160,7 @@ static void home_init(view_t *self)
     /* ==================== 视频页面按钮 ==================== */
     lv_obj_t *video_btn = lv_btn_create(object);
     lv_obj_set_size(video_btn, 60, 60);
-    lv_obj_set_pos(video_btn, 90, 210);
+    lv_obj_set_pos(video_btn, 225, 130);
 
     lv_obj_t *video_label = lv_label_create(video_btn);
     lv_label_set_text(video_label, "VIDEO");
@@ -171,7 +171,7 @@ static void home_init(view_t *self)
     /* ==================== U盘模式按钮 ==================== */
     lv_obj_t *usb_btn = lv_btn_create(object);
     lv_obj_set_size(usb_btn, 60, 60);
-    lv_obj_set_pos(usb_btn, 190, 210);
+    lv_obj_set_pos(usb_btn, 35, 210);
 
     lv_obj_t *usb_label = lv_label_create(usb_btn);
     lv_label_set_text(usb_label, "USB");
@@ -182,7 +182,7 @@ static void home_init(view_t *self)
     /* ==================== 录音页按钮 ==================== */
     lv_obj_t *recorder_btn = lv_btn_create(object);
     lv_obj_set_size(recorder_btn, 60, 60);
-    lv_obj_set_pos(recorder_btn, 90, 290);
+    lv_obj_set_pos(recorder_btn, 130, 210);
 
     lv_obj_t *recorder_label = lv_label_create(recorder_btn);
     lv_label_set_text(recorder_label, "REC");
@@ -193,7 +193,7 @@ static void home_init(view_t *self)
     /* ==================== WiFi连接页按钮 ==================== */
     lv_obj_t *wifi_btn = lv_btn_create(object);
     lv_obj_set_size(wifi_btn, 60, 60);
-    lv_obj_set_pos(wifi_btn, 190, 290);
+    lv_obj_set_pos(wifi_btn, 225, 210);
 
     lv_obj_t *wifi_label = lv_label_create(wifi_btn);
     lv_label_set_text(wifi_label, "WIFI");

@@ -75,13 +75,18 @@ static wifi_page_ui_t s_ui =
     },
 };
 
-/* 扫描结果: 扫描任务写, LVGL任务读, 用互斥锁保护 */
-static SemaphoreHandle_t s_scan_lock = NULL;
-static char s_scan_list[WIFI_MAX_AP][WIFI_SSID_LEN];
-static int s_scan_count = 0;
-static volatile bool s_scan_ready = false;
-static volatile bool s_scan_busy = false;
-static char s_options[WIFI_OPTIONS_LEN];
+/* 扫描结果上下文: 扫描任务写, LVGL任务读, 用互斥锁保护 */
+typedef struct
+{
+    SemaphoreHandle_t lock;                     /* 保护 list/count 的互斥锁 */
+    char list[WIFI_MAX_AP][WIFI_SSID_LEN];      /* 扫描到的SSID */
+    int count;                                  /* 有效SSID数量 */
+    volatile bool ready;                        /* 有新结果待应用到界面 */
+    volatile bool busy;                         /* 扫描进行中 */
+    char options[WIFI_OPTIONS_LEN];             /* 下拉框用换行拼接串 */
+} wifi_scan_ctx_t;
+
+static wifi_scan_ctx_t s_scan = {0};
 
 /**********************
  *   内部辅助
@@ -103,12 +108,12 @@ static void wifi_scan_cb(int num, wifi_ap_record_t *records)
         n = WIFI_MAX_AP;
     }
 
-    if (s_scan_lock != NULL)
+    if (s_scan.lock != NULL)
     {
-        xSemaphoreTake(s_scan_lock, portMAX_DELAY);
+        xSemaphoreTake(s_scan.lock, portMAX_DELAY);
     }
 
-    s_scan_count = 0;
+    s_scan.count = 0;
 
     for (int i = 0; i < n; i++)
     {
@@ -119,29 +124,29 @@ static void wifi_scan_cb(int num, wifi_ap_record_t *records)
             continue;               /* 隐藏SSID无法手动连接, 跳过 */
         }
 
-        strlcpy(s_scan_list[s_scan_count], ssid, WIFI_SSID_LEN);
-        s_scan_count++;
+        strlcpy(s_scan.list[s_scan.count], ssid, WIFI_SSID_LEN);
+        s_scan.count++;
     }
 
-    if (s_scan_lock != NULL)
+    if (s_scan.lock != NULL)
     {
-        xSemaphoreGive(s_scan_lock);
+        xSemaphoreGive(s_scan.lock);
     }
 
-    s_scan_busy  = false;
-    s_scan_ready = true;
+    s_scan.busy  = false;
+    s_scan.ready = true;
 }
 
 /* 发起扫描(幂等: 正在扫描时忽略) */
 static void wifi_scan_start(wifi_page_ui_t *ui)
 {
-    if (s_scan_busy)
+    if (s_scan.busy)
     {
         return;
     }
 
-    s_scan_busy        = true;
-    s_scan_ready       = false;
+    s_scan.busy        = true;
+    s_scan.ready       = false;
     ui->scan_deadline  = esp_timer_get_time() + WIFI_SCAN_WAIT_US;
 
     if (ui->status_label != NULL)
@@ -151,7 +156,7 @@ static void wifi_scan_start(wifi_page_ui_t *ui)
 
     if (wifi_manager_scan(wifi_scan_cb) != ESP_OK)
     {
-        s_scan_busy = false;
+        s_scan.busy = false;
 
         if (ui->status_label != NULL)
         {
@@ -166,38 +171,38 @@ static void wifi_apply_scan(wifi_page_ui_t *ui)
     int n;
     size_t pos = 0;
 
-    s_scan_ready = false;
+    s_scan.ready = false;
 
-    if (s_scan_lock != NULL)
+    if (s_scan.lock != NULL)
     {
-        xSemaphoreTake(s_scan_lock, portMAX_DELAY);
+        xSemaphoreTake(s_scan.lock, portMAX_DELAY);
     }
 
-    n = s_scan_count;
-    s_options[0] = '\0';
+    n = s_scan.count;
+    s_scan.options[0] = '\0';
 
     for (int i = 0; i < n; i++)
     {
-        size_t len = strlen(s_scan_list[i]);
+        size_t len = strlen(s_scan.list[i]);
 
-        if (pos + len + 2 > sizeof(s_options))
+        if (pos + len + 2 > sizeof(s_scan.options))
         {
             break;
         }
 
         if (pos > 0)
         {
-            s_options[pos++] = '\n';
+            s_scan.options[pos++] = '\n';
         }
 
-        memcpy(&s_options[pos], s_scan_list[i], len);
+        memcpy(&s_scan.options[pos], s_scan.list[i], len);
         pos += len;
-        s_options[pos] = '\0';
+        s_scan.options[pos] = '\0';
     }
 
-    if (s_scan_lock != NULL)
+    if (s_scan.lock != NULL)
     {
-        xSemaphoreGive(s_scan_lock);
+        xSemaphoreGive(s_scan.lock);
     }
 
     if (pos == 0)
@@ -208,7 +213,7 @@ static void wifi_apply_scan(wifi_page_ui_t *ui)
         return;
     }
 
-    lv_dropdown_set_options(ui->ap_dd, s_options);
+    lv_dropdown_set_options(ui->ap_dd, s_scan.options);
     lv_dropdown_set_selected(ui->ap_dd, 0);
     lv_label_set_text_fmt(ui->status_label, "%d network(s), select one", n);
 }
@@ -434,7 +439,7 @@ static void wifi_page_destroy(view_t *self)
     ui->kb           = NULL;
     ui->status_label = NULL;
 
-    s_scan_ready     = false;
+    s_scan.ready     = false;
     ui->connecting   = false;
     ui->last_connected = false;
 }
@@ -484,13 +489,13 @@ static void wifi_page_on_update(view_t *self)
 
     ui->last_update_us = now;
 
-    if (s_scan_ready)
+    if (s_scan.ready)
     {
         wifi_apply_scan(ui);
     }
-    else if (s_scan_busy && now >= ui->scan_deadline)
+    else if (s_scan.busy && now >= ui->scan_deadline)
     {
-        s_scan_busy = false;
+        s_scan.busy = false;
         lv_label_set_text(ui->status_label, "Scan timeout, tap SCAN");
     }
 
@@ -510,7 +515,7 @@ void wifi_page_init(void)
         /* WiFi协议栈初始化(原在main): 启动STA但不连接任何热点,
          * 具体连哪个由本页面选择 */
         ap_wifi_init(NULL);
-        s_scan_lock = xSemaphoreCreateMutex();
+        s_scan.lock = xSemaphoreCreateMutex();
         wifi_inited = true;
     }
 
