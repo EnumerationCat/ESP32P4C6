@@ -12,6 +12,7 @@
 #include "usb_disk_page.h"
 #include "recorder_page.h"
 #include "wifi_page.h"
+#include "popup.h"
 #include "page_manager.h"
 #include "view.h"
 #include "container_of.h"
@@ -118,6 +119,36 @@ static void wifi_btn_event_cb(lv_event_t *e)
     manager_gopage(WIFI_PAGE_ID);
 }
 
+/* 顶部提示弹窗测试: 2秒后自动收回 */
+static void msg_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+
+    popup_notice_show("Hello, this is a popup notice!", 2000);
+}
+
+/* 双按钮弹窗的按钮回调(在弹窗关闭前调用) */
+static void popup_cancel_cb(void *user_data)
+{
+    (void)user_data;
+    popup_notice_show("Cancel clicked", 1500);
+}
+
+static void popup_ok_cb(void *user_data)
+{
+    (void)user_data;
+    popup_notice_show("OK clicked", 1500);
+}
+
+/* 底部双按钮弹窗测试 */
+static void dialog_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+
+    popup_confirm_show("Are you sure you want to continue?",
+                       "Cancel", "OK", popup_cancel_cb, popup_ok_cb, NULL);
+}
+
 /* 创建主界面控件(幂等) */
 static void home_init(view_t *self)
 {
@@ -134,6 +165,10 @@ static void home_init(view_t *self)
     lv_obj_t *object = lv_obj_create(ui->screen);
     lv_obj_set_size(object, LV_HOR_RES, LV_VER_RES);
     lv_obj_set_style_border_width(object, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(object, 0, LV_PART_MAIN);
+    /* 主题的card样式默认有16px内边距, 会把子控件整体右/下偏移, 这里清零,
+     * 保证 set_pos 的坐标就是相对屏幕左上角 */
+    lv_obj_set_style_pad_all(object, 0, LV_PART_MAIN);
 
     /* ==================== 相机启动按钮 ==================== */
     lv_obj_t *camera_btn = lv_btn_create(object);
@@ -200,6 +235,27 @@ static void home_init(view_t *self)
     lv_obj_center(wifi_label);
 
     lv_obj_add_event_cb(wifi_btn, wifi_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    /* ==================== 弹窗测试按钮(第三行居中两个) ==================== */
+    lv_obj_t *msg_btn = lv_btn_create(object);
+    lv_obj_set_size(msg_btn, 60, 60);
+    lv_obj_set_pos(msg_btn, 67, 290);
+
+    lv_obj_t *msg_label = lv_label_create(msg_btn);
+    lv_label_set_text(msg_label, "MSG");
+    lv_obj_center(msg_label);
+
+    lv_obj_add_event_cb(msg_btn, msg_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *dialog_btn = lv_btn_create(object);
+    lv_obj_set_size(dialog_btn, 60, 60);
+    lv_obj_set_pos(dialog_btn, 193, 290);
+
+    lv_obj_t *dialog_label = lv_label_create(dialog_btn);
+    lv_label_set_text(dialog_label, "DIALOG");
+    lv_obj_center(dialog_label);
+
+    lv_obj_add_event_cb(dialog_btn, dialog_btn_event_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* 销毁主界面控件 */
