@@ -14,6 +14,7 @@
 #include "wifi_page.h"
 #include "popup_notice.h"
 #include "popup_confirm.h"
+#include "popup_toast.h"
 #include "page_manager.h"
 #include "view.h"
 #include "container_of.h"
@@ -148,6 +149,14 @@ static void dialog_btn_event_cb(lv_event_t *e)
                        "Cancel", "OK", popup_cancel_cb, popup_ok_cb, NULL);
 }
 
+/* 中心toast弹窗测试: 2秒后自动收回 */
+static void toast_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+
+    popup_toast_show("Hello, this is a toast!", 2000);
+}
+
 /* 系统级提示弹窗测试: 用来验证应用级弹窗盖不住系统级弹窗 */
 static void msg2_btn_event_cb(lv_event_t *e)
 {
@@ -243,10 +252,10 @@ static void home_init(view_t *self)
 
     lv_obj_add_event_cb(wifi_btn, wifi_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
-    /* ==================== 弹窗测试按钮(第三行居中两个) ==================== */
+    /* ==================== 三种弹窗测试按钮(第三行, 与上方网格对齐) ==================== */
     lv_obj_t *msg_btn = lv_btn_create(object);
     lv_obj_set_size(msg_btn, 60, 60);
-    lv_obj_set_pos(msg_btn, 67, 290);
+    lv_obj_set_pos(msg_btn, 35, 290);
 
     lv_obj_t *msg_label = lv_label_create(msg_btn);
     lv_label_set_text(msg_label, "MSG");
@@ -256,13 +265,23 @@ static void home_init(view_t *self)
 
     lv_obj_t *dialog_btn = lv_btn_create(object);
     lv_obj_set_size(dialog_btn, 60, 60);
-    lv_obj_set_pos(dialog_btn, 193, 290);
+    lv_obj_set_pos(dialog_btn, 130, 290);
 
     lv_obj_t *dialog_label = lv_label_create(dialog_btn);
     lv_label_set_text(dialog_label, "DIALOG");
     lv_obj_center(dialog_label);
 
     lv_obj_add_event_cb(dialog_btn, dialog_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *toast_btn = lv_btn_create(object);
+    lv_obj_set_size(toast_btn, 60, 60);
+    lv_obj_set_pos(toast_btn, 225, 290);
+
+    lv_obj_t *toast_label = lv_label_create(toast_btn);
+    lv_label_set_text(toast_label, "TOAST");
+    lv_obj_center(toast_label);
+
+    lv_obj_add_event_cb(toast_btn, toast_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
     /* ==================== 系统级弹窗测试按钮(第四行居中) ==================== */
     lv_obj_t *msg2_btn = lv_btn_create(object);
