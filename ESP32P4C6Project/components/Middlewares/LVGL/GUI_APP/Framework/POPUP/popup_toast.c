@@ -243,8 +243,8 @@ void popup_toast_show(const char *text, uint32_t duration_ms)
     strlcpy(proto.text, text, sizeof(proto.text));
     proto.base.value = duration_ms;                 /* 存活时间, 0=常驻 */
 
-    ui = (popup_toast_ui_t *)g_popup_manager.create(
-             &proto.base, sizeof(proto), POPUP_LEVEL_SYS, SYSTEM_PRIORITY1);
+    ui = (popup_toast_ui_t *)system_popup_create(
+             &proto.base, sizeof(proto), SYSTEM_PRIORITY1);
 
     if (ui == NULL)
     {

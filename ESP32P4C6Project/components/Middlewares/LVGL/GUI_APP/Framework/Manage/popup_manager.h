@@ -116,6 +116,32 @@ void popup_manager_init(void);
  */
 
 /**
+ * @brief       按原型创建并上架一个系统级弹窗(create 的便捷封装)
+ * @note        等价于 g_popup_manager.create(proto, size, POPUP_LEVEL_SYS, priority);
+ *              跨页面保留, 控件应绘制在 lv_layer_sys()
+ * @param       proto:    实例模板(整块派生结构的原型)
+ * @param       size:     实例总大小(字节, 至少为 sizeof(popup_base_t))
+ * @param       priority: 系统级队列内优先级(数值越大越靠上)
+ * @retval      新的弹窗基类指针; 分配失败返回NULL
+ */
+struct popup_base *system_popup_create(const struct popup_base *proto,
+                                       uint32_t size,
+                                       systempopup_priority_t priority);
+
+/**
+ * @brief       按原型创建并上架一个应用级弹窗(create 的便捷封装)
+ * @note        等价于 g_popup_manager.create(proto, size, POPUP_LEVEL_APP, priority);
+ *              随页面切换关闭, 控件应绘制在 lv_layer_top()
+ * @param       proto:    实例模板(整块派生结构的原型)
+ * @param       size:     实例总大小(字节, 至少为 sizeof(popup_base_t))
+ * @param       priority: 应用级队列内优先级(数值越大越靠上)
+ * @retval      新的弹窗基类指针; 分配失败返回NULL
+ */
+struct popup_base *app_popup_create(const struct popup_base *proto,
+                                    uint32_t size,
+                                    apppopup_priority_t priority);
+
+/**
  * @brief       关闭某一层的所有弹窗(从优先级最高的开始)
  * @param       level: 弹窗层
  * @retval      无

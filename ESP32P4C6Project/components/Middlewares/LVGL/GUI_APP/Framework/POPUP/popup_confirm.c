@@ -320,8 +320,8 @@ void popup_confirm_show(const char *desc,
     proto.right_cb  = right_cb;
     proto.user_data = user_data;
 
-    ui = (popup_confirm_ui_t *)g_popup_manager.create(
-             &proto.base, sizeof(proto), POPUP_LEVEL_APP, APP_PRIORITY0);
+    ui = (popup_confirm_ui_t *)app_popup_create(
+             &proto.base, sizeof(proto), APP_PRIORITY0);
 
     if (ui == NULL)
     {

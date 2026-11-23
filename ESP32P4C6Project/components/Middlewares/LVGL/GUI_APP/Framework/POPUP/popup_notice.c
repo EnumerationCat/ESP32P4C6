@@ -234,8 +234,8 @@ void popup_notice_show(const char *text, uint32_t duration_ms)
     strlcpy(proto.text, text, sizeof(proto.text));
     proto.base.value = duration_ms;                 /* 存活时间, 0=常驻 */
 
-    ui = (popup_notice_ui_t *)g_popup_manager.create(
-             &proto.base, sizeof(proto), POPUP_LEVEL_SYS, SYSTEM_PRIORITY0);
+    ui = (popup_notice_ui_t *)system_popup_create(
+             &proto.base, sizeof(proto), SYSTEM_PRIORITY0);
 
     if (ui == NULL)
     {

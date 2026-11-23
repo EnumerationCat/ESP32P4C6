@@ -233,6 +233,22 @@ static popup_base_t *popup_create(const popup_base_t *proto, uint32_t size,
     return popup;
 }
 
+/* create 的系统级便捷封装 */
+popup_base_t *system_popup_create(const popup_base_t *proto, uint32_t size,
+                                  systempopup_priority_t priority)
+{
+    return g_popup_manager.create(proto, size, POPUP_LEVEL_SYS,
+                                  (uint32_t)priority);
+}
+
+/* create 的应用级便捷封装 */
+popup_base_t *app_popup_create(const popup_base_t *proto, uint32_t size,
+                               apppopup_priority_t priority)
+{
+    return g_popup_manager.create(proto, size, POPUP_LEVEL_APP,
+                                  (uint32_t)priority);
+}
+
 /* destroy: 停止(运行中先 on_stop 销毁控件) + 出队 + 释放动态实例内存 */
 static void popup_destroy(view_t *view)
 {
