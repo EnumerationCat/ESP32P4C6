@@ -7,6 +7,7 @@
  */
 
 #include "popup_manager.h"
+#include "popup_base.h"
 #include "container_of.h"
 
 /* 弹窗管理器上下文 */
@@ -27,7 +28,7 @@ static inline view_t *view_of(list_head_t *node)
 }
 
 /* 取某一层对应的链表 */
-static list_t *level_list(popup_manager_t *pm, popup_level_t level)
+static list_t *level_list(popup_manager_t *pm, popup_priority_t level)
 {
     return (level == POPUP_LEVEL_SYS) ? &pm->sys : &pm->app;
 }
@@ -49,7 +50,7 @@ void popup_manager_init(void)
     manager_ensure_init(&s_pm);
 }
 
-void popup_manager_open(view_t *view, popup_level_t level, uint32_t priority)
+void popup_manager_open(view_t *view, popup_priority_t level, uint32_t priority)
 {
     popup_manager_t *pm = &s_pm;
     list_t *list;
@@ -70,6 +71,34 @@ void popup_manager_open(view_t *view, popup_level_t level, uint32_t priority)
     }
 
     list_add_sorted(list, &view->link);
+}
+
+popup_base_t *popup_create(view_t *view, popup_priority_t level, uint32_t priority)
+{
+    popup_base_t *popup;
+
+    if (view == NULL)
+    {
+        return NULL;
+    }
+
+    popup = popup_base_of(view);
+    popup->level    = level;
+    popup->priority = priority;
+
+    popup_manager_open(view, level, priority);
+
+    return popup;
+}
+
+popup_base_t *popup_systempopup_create(view_t *view, systempopup_priority_t priority)
+{
+    return popup_create(view, POPUP_LEVEL_SYS, (uint32_t)priority);
+}
+
+popup_base_t *popup_apppopup_create(view_t *view, apppopup_priority_t priority)
+{
+    return popup_create(view, POPUP_LEVEL_APP, (uint32_t)priority);
 }
 
 void popup_manager_close(view_t *view)
@@ -96,7 +125,7 @@ void popup_manager_close(view_t *view)
     list_delete(&view->link);
 }
 
-void popup_manager_close_all(popup_level_t level)
+void popup_manager_close_all(popup_priority_t level)
 {
     popup_manager_t *pm = &s_pm;
     list_t *list;
@@ -120,7 +149,7 @@ void popup_manager_close_all(popup_level_t level)
     }
 }
 
-view_t *popup_manager_top(popup_level_t level)
+view_t *popup_manager_top(popup_priority_t level)
 {
     popup_manager_t *pm = &s_pm;
     list_head_t *node;

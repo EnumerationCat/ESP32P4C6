@@ -9,6 +9,7 @@
  */
 
 #include "popup_confirm.h"
+#include "popup_base.h"
 #include "popup_manager.h"
 #include "view.h"
 #include "container_of.h"
@@ -20,7 +21,6 @@
 #define POPUP_ANIM_MS              250                 /* 滑入/滑出时长 */
 #define POPUP_CONFIRM_DESC_MAX     128
 #define POPUP_BTN_TEXT_MAX         24
-#define POPUP_PRIORITY_CONFIRM     20                  /* 应用级队列内优先级 */
 
 #define POPUP_CONFIRM_W            300                 /* 确认弹窗尺寸/位置 */
 #define POPUP_CONFIRM_HEIGHT            200
@@ -33,7 +33,7 @@
 /* 底部确认弹窗 */
 typedef struct
 {
-    view_t base;                                        /* Framework基类(必须放第一位) */
+    popup_base_t base;                                  /* 弹窗基类(必须放第一位) */
     lv_obj_t *mask;                                     /* 全屏遮罩(模态, 挡住底层点击) */
     lv_obj_t *panel;                                    /* 底部面板 */
     lv_obj_t *desc;                                     /* 居中描述文本 */
@@ -67,10 +67,15 @@ static popup_confirm_ui_t s_confirm =
 {
     .base =
     {
-        .id       = POPUP_ID_CONFIRM,
-        .name     = "popup_confirm",
-        .on_start = confirm_on_start,
-        .on_stop  = confirm_on_stop,
+        .view =
+        {
+            .id       = POPUP_ID_CONFIRM,
+            .name     = "popup_confirm",
+            .on_start = confirm_on_start,
+            .on_stop  = confirm_on_stop,
+        },
+        .level    = POPUP_LEVEL_APP,
+        .priority = APP_PRIORITY0,
     },
 };
 
@@ -81,7 +86,7 @@ static popup_confirm_ui_t s_confirm =
 /* 由基类指针还原派生弹窗 */
 static inline popup_confirm_ui_t *confirm_ui(view_t *self)
 {
-    return container_of(self, popup_confirm_ui_t, base);
+    return container_of(popup_base_of(self), popup_confirm_ui_t, base);
 }
 
 /* 纵向滑动动画(Y方向), ready可为NULL */
@@ -108,7 +113,7 @@ static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
 static void confirm_out_ready_cb(lv_anim_t *a)
 {
     (void)a;
-    popup_manager_close(&s_confirm.base);
+    popup_manager_close(&s_confirm.base.view);
 }
 
 /* 从屏幕下方滑入到停靠位置 */
@@ -273,7 +278,7 @@ void popup_confirm_show(const char *desc,
         return;
     }
 
-    popup_manager_open(&s_confirm.base, POPUP_LEVEL_APP, POPUP_PRIORITY_CONFIRM);
+    popup_apppopup_create(&s_confirm.base.view, APP_PRIORITY0);
 }
 
 void popup_confirm_hide(void)

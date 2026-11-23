@@ -34,7 +34,27 @@ typedef enum
 {
     POPUP_LEVEL_APP = 0,                /* 应用级: 跟随页面 */
     POPUP_LEVEL_SYS = 1,                /* 系统级: 跨页面, 永远在上 */
-} popup_level_t;
+} popup_priority_t;
+
+typedef enum
+{
+    APP_PRIORITY0 = 0,                  /* 应用级队列内优先级 */
+    APP_PRIORITY1 = 1,
+} apppopup_priority_t;
+
+typedef enum
+{
+    SYSTEM_PRIORITY0 = 0,               /* 系统级队列内优先级 */
+    SYSTEM_PRIORITY1 = 1,
+} systempopup_priority_t;
+
+/* 弹窗基类(定义见 POPUP/popup_base.h, 这里只前向声明指针) */
+struct popup_base;
+
+
+
+
+
 
 /**
  * @brief       初始化弹窗管理器(可重复调用)
@@ -51,7 +71,41 @@ void popup_manager_init(void);
  * @param       priority: 同层内优先级(数值越大越靠上)
  * @retval      无
  */
-void popup_manager_open(view_t *view, popup_level_t level, uint32_t priority);
+void popup_manager_open(view_t *view, popup_priority_t level, uint32_t priority);
+
+/**
+ * @brief       创建(打开)一个弹窗, 层级/优先级显式指定
+ * @note        view 必须内嵌在 popup_base_t 中(即弹窗从 popup_base_t 派生),
+ *              本函数会通过 container_of 还原 popup_base_t 并记录 level/priority
+ * @param       view:     弹窗的 view_t 指针(&popup->base.view)
+ * @param       level:    所属层(应用级/系统级)
+ * @param       priority: 层内优先级(数值越大越靠上)
+ * @retval      popup_base_t指针; view为NULL时返回NULL
+ */
+struct popup_base *popup_create(view_t *view, popup_priority_t level,
+                                uint32_t priority);
+
+/**
+ * @brief       创建(打开)一个系统级弹窗
+ * @note        等价于 popup_create(view, POPUP_LEVEL_SYS, priority);
+ *              跨页面保留, 控件应绘制在 lv_layer_sys()
+ * @param       view:     弹窗的 view_t 指针(&popup->base.view)
+ * @param       priority: 系统级队列内优先级(数值越大越靠上)
+ * @retval      popup_base_t指针; view为NULL时返回NULL
+ */
+struct popup_base *popup_systempopup_create(view_t *view,
+                                            systempopup_priority_t priority);
+
+/**
+ * @brief       创建(打开)一个应用级弹窗
+ * @note        等价于 popup_create(view, POPUP_LEVEL_APP, priority);
+ *              随页面切换关闭, 控件应绘制在 lv_layer_top()
+ * @param       view:     弹窗的 view_t 指针(&popup->base.view)
+ * @param       priority: 应用级队列内优先级(数值越大越靠上)
+ * @retval      popup_base_t指针; view为NULL时返回NULL
+ */
+struct popup_base *popup_apppopup_create(view_t *view,
+                                         apppopup_priority_t priority);
 
 /**
  * @brief       关闭指定弹窗: 调 on_stop 后从队列移除
@@ -65,14 +119,14 @@ void popup_manager_close(view_t *view);
  * @param       level: 弹窗层
  * @retval      无
  */
-void popup_manager_close_all(popup_level_t level);
+void popup_manager_close_all(popup_priority_t level);
 
 /**
  * @brief       取某一层当前优先级最高的弹窗
  * @param       level: 弹窗层
  * @retval      弹窗对象; 无弹窗返回NULL
  */
-view_t *popup_manager_top(popup_level_t level);
+view_t *popup_manager_top(popup_priority_t level);
 
 /**
  * @brief       关闭最上层的一个弹窗(page_back 用)

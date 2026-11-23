@@ -132,13 +132,11 @@ static void msg_btn_event_cb(lv_event_t *e)
 static void popup_cancel_cb(void *user_data)
 {
     (void)user_data;
-    popup_notice_show("Cancel clicked", 1500);
 }
 
 static void popup_ok_cb(void *user_data)
 {
     (void)user_data;
-    popup_notice_show("OK clicked", 1500);
 }
 
 /* 底部双按钮弹窗测试 */
@@ -148,6 +146,14 @@ static void dialog_btn_event_cb(lv_event_t *e)
 
     popup_confirm_show("Are you sure you want to continue?",
                        "Cancel", "OK", popup_cancel_cb, popup_ok_cb, NULL);
+}
+
+/* 系统级提示弹窗测试: 用来验证应用级弹窗盖不住系统级弹窗 */
+static void msg2_btn_event_cb(lv_event_t *e)
+{
+    (void)e;
+
+    popup_notice_show("SYS level notice", 5000);
 }
 
 /* 创建主界面控件(幂等) */
@@ -257,6 +263,17 @@ static void home_init(view_t *self)
     lv_obj_center(dialog_label);
 
     lv_obj_add_event_cb(dialog_btn, dialog_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    /* ==================== 系统级弹窗测试按钮(第四行居中) ==================== */
+    lv_obj_t *msg2_btn = lv_btn_create(object);
+    lv_obj_set_size(msg2_btn, 60, 60);
+    lv_obj_set_pos(msg2_btn, 130, 370);
+
+    lv_obj_t *msg2_label = lv_label_create(msg2_btn);
+    lv_label_set_text(msg2_label, "MSG2");
+    lv_obj_center(msg2_label);
+
+    lv_obj_add_event_cb(msg2_btn, msg2_btn_event_cb, LV_EVENT_CLICKED, NULL);
 }
 
 /* 销毁主界面控件 */

@@ -9,6 +9,7 @@
  */
 
 #include "popup_notice.h"
+#include "popup_base.h"
 #include "popup_manager.h"
 #include "view.h"
 #include "container_of.h"
@@ -19,7 +20,6 @@
 #define POPUP_ID_NOTICE            100                 /* 仅供日志调试 */
 #define POPUP_ANIM_MS              250                 /* 滑入/滑出时长 */
 #define POPUP_NOTICE_TEXT_MAX      64
-#define POPUP_PRIORITY_NOTICE      10                  /* 系统级队列内优先级 */
 
 #define POPUP_NOTICE_W             280                 /* 提示弹窗尺寸/位置 */
 #define POPUP_NOTICE_HEIGHT             96
@@ -29,7 +29,7 @@
 /* 顶部提示弹窗 */
 typedef struct
 {
-    view_t base;                                        /* Framework基类(必须放第一位) */
+    popup_base_t base;                                  /* 弹窗基类(必须放第一位) */
     lv_obj_t *panel;                                    /* 提示面板 */
     lv_obj_t *label;                                    /* 居中文字 */
     lv_timer_t *timer;                                  /* 自动收回定时器 */
@@ -55,10 +55,15 @@ static popup_notice_ui_t s_notice =
 {
     .base =
     {
-        .id       = POPUP_ID_NOTICE,
-        .name     = "popup_notice",
-        .on_start = notice_on_start,
-        .on_stop  = notice_on_stop,
+        .view =
+        {
+            .id       = POPUP_ID_NOTICE,
+            .name     = "popup_notice",
+            .on_start = notice_on_start,
+            .on_stop  = notice_on_stop,
+        },
+        .level    = POPUP_LEVEL_SYS,
+        .priority = SYSTEM_PRIORITY0,
     },
 };
 
@@ -69,7 +74,7 @@ static popup_notice_ui_t s_notice =
 /* 由基类指针还原派生弹窗 */
 static inline popup_notice_ui_t *notice_ui(view_t *self)
 {
-    return container_of(self, popup_notice_ui_t, base);
+    return container_of(popup_base_of(self), popup_notice_ui_t, base);
 }
 
 /* 纵向滑动动画(Y方向), ready可为NULL */
@@ -96,7 +101,7 @@ static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
 static void notice_out_ready_cb(lv_anim_t *a)
 {
     (void)a;
-    popup_manager_close(&s_notice.base);
+    popup_manager_close(&s_notice.base.view);
 }
 
 /* 自动收回(定时器回调) */
@@ -209,7 +214,7 @@ void popup_notice_show(const char *text, uint32_t duration_ms)
         return;
     }
 
-    popup_manager_open(&s_notice.base, POPUP_LEVEL_SYS, POPUP_PRIORITY_NOTICE);
+    popup_systempopup_create(&s_notice.base.view, SYSTEM_PRIORITY0);
 }
 
 void popup_notice_hide(void)
