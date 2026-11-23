@@ -126,7 +126,7 @@ static void msg_btn_event_cb(lv_event_t *e)
 {
     (void)e;
 
-    popup_notice_show("Hello, this is a popup notice!", 2000);
+    popup_notice_show("System0 notice!", 2000);
 }
 
 /* 双按钮弹窗的按钮回调(在弹窗关闭前调用) */
@@ -154,7 +154,7 @@ static void toast_btn_event_cb(lv_event_t *e)
 {
     (void)e;
 
-    popup_toast_show("Hello, this is a toast!", 2000);
+    popup_toast_show("System1 toast", 2000);
 }
 
 /* 系统级提示弹窗测试: 用来验证应用级弹窗盖不住系统级弹窗 */
@@ -162,7 +162,7 @@ static void msg2_btn_event_cb(lv_event_t *e)
 {
     (void)e;
 
-    popup_notice_show("SYS level notice", 5000);
+    popup_notice_show("System0 notice", 2000);
 }
 
 /* 创建主界面控件(幂等) */
