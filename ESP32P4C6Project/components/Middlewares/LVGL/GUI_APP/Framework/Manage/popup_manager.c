@@ -1,6 +1,17 @@
 /**
  * @file popup_manager.c
- * @brief 弹窗管理器实现: 应用级/系统级两条按优先级排序的侵入式链表
+ * @brief 弹窗管理器实现: 模仿 FreeRTOS 任务调度
+ *
+ * 调度模型:
+ *   app / sys 两条按 priority 升序排列的 ready 链表, sys 整体优先级高于 app;
+ *   同一时刻只有一个弹窗"运行"(显示中, 已调 on_start), 其余在 ready 链表排队。
+ *
+ *   - 抢占: 新弹窗严格高于当前运行弹窗(先比层级 sys>app, 再比 priority)时,
+ *           当前弹窗被直接关闭(调 on_stop 销毁控件并出队), 高优先级退出后
+ *           不会再恢复; 新弹窗立即运行;
+ *   - 同优先级: 不抢占, 后来的排在已排队节点之后(FIFO), 等前面的退出后再轮到自己;
+ *   - 存活时间: popup_base.value(ms), 只在运行期间倒计时;
+ *           到 0 调 request_close 让弹窗自己退场, 没有回调则直接关闭; 0=常驻。
  *
  * 与 page_manager 解耦: 这里只碰弹窗对象和它们内嵌的 view_t.link,
  * 不调用任何页面的 on_pause/on_resume, 也不修改页面栈。
@@ -9,31 +20,150 @@
 #include "popup_manager.h"
 #include "popup_base.h"
 #include "container_of.h"
+#include "lvgl.h"
 
-/* 弹窗管理器上下文 */
-typedef struct
+#include <string.h>
+
+/* 统一生命周期方法(经 g_popup_manager.create/destroy 暴露) */
+static popup_base_t *popup_create(const popup_base_t *proto, uint32_t size,
+                                  popup_priority_t level, uint32_t priority);
+static void popup_destroy(view_t *view);
+
+/* 全局唯一实例(其余字段零初始化, 由 ensure_init 填充) */
+popup_manager_t g_popup_manager =
 {
-    bool inited;                        /* 两条链表是否已初始化 */
-    list_t app;                         /* 应用级弹窗(优先级升序) */
-    list_t sys;                         /* 系统级弹窗(优先级升序) */
-} popup_manager_t;
-
-/* 全局唯一实例(静态零初始化) */
-static popup_manager_t s_pm;
+    .create  = popup_create,
+    .destroy = popup_destroy,
+};
 
 /* 节点 -> 弹窗 */
-static inline view_t *view_of(list_head_t *node)
+static inline view_t *popup_view_of(list_head_t *node)
 {
     return container_of(node, view_t, link);
 }
 
 /* 取某一层对应的链表 */
-static list_t *level_list(popup_manager_t *pm, popup_priority_t level)
+static list_t *popup_level_list(popup_manager_t *pm, popup_priority_t level)
 {
     return (level == POPUP_LEVEL_SYS) ? &pm->sys : &pm->app;
 }
 
-static void manager_ensure_init(popup_manager_t *pm)
+/* 某一层里优先级最高(同优先级取最早入队)的弹窗 */
+static view_t *popup_list_pick(list_t *list)
+{
+    list_head_t *node;
+    list_head_t *best = NULL;
+
+    list_for_each(node, list)
+    {
+        if (best == NULL || node->value > best->value)
+        {
+            best = node;            /* 严格大于才替换 => 同优先级 FIFO */
+        }
+    }
+
+    return (best != NULL) ? popup_view_of(best) : NULL;
+}
+
+/* 全局下一个该运行的弹窗: sys 整层优先于 app */
+static view_t *popup_pick_ready(popup_manager_t *pm)
+{
+    view_t *view = popup_list_pick(&pm->sys);
+
+    return (view != NULL) ? view : popup_list_pick(&pm->app);
+}
+
+/* a 是否严格高于 b(先比层级, 再比 priority) */
+static bool popup_strictly_higher(view_t *a, view_t *b)
+{
+    popup_base_t *pa = popup_base_of(a);
+    popup_base_t *pb = popup_base_of(b);
+
+    if (pa->level != pb->level)
+    {
+        return pa->level > pb->level;
+    }
+
+    return pa->priority > pb->priority;
+}
+
+/* 开始运行某个弹窗 */
+static void popup_start_running(popup_manager_t *pm, view_t *view)
+{
+    pm->running  = view;
+    pm->expiring = false;
+    pm->run_tick = lv_tick_get();
+
+    if (view->on_start != NULL)
+    {
+        view->on_start(view);
+    }
+}
+
+/* 出队后释放动态实例(静态实例 dispose 为 NULL) */
+static void popup_dispose(view_t *view)
+{
+    popup_base_t *base = popup_base_of(view);
+
+    /* dispose==NULL 视为静态实例: 只出队不释放。
+     * 动态实例: 先调类型清理钩子(从本类型实例链表摘除), 再由管理器统一释放内存。 */
+    if (base->dispose != NULL)
+    {
+        base->dispose(view);
+        lv_mem_free(base);
+    }
+}
+
+/* 抢占: 被抢占的弹窗直接关闭(出队销毁, 高优先级退出后不再恢复) */
+static void popup_preempt_running(popup_manager_t *pm)
+{
+    view_t *preempted = pm->running;
+
+    if (preempted == NULL)
+    {
+        return;
+    }
+
+    pm->running  = NULL;
+    pm->expiring = false;
+
+    if (preempted->on_stop != NULL)
+    {
+        preempted->on_stop(preempted);
+    }
+
+    list_delete(&preempted->link);
+    popup_dispose(preempted);
+}
+
+/* 调度: 选出该运行的弹窗, 必要时抢占当前运行者 */
+static void popup_schedule(popup_manager_t *pm)
+{
+    view_t *next = popup_pick_ready(pm);
+
+    if (next == pm->running)
+    {
+        return;
+    }
+
+    if (pm->running != NULL)
+    {
+        /* 同优先级或更低优先级不抢占, 等当前弹窗自己退出 */
+        if (next == NULL || !popup_strictly_higher(next, pm->running))
+        {
+            return;
+        }
+
+        popup_preempt_running(pm);
+    }
+
+    if (next != NULL)
+    {
+        popup_start_running(pm, next);
+    }
+}
+
+static void popup_manager_ensure_init(popup_manager_t *pm)
 {
     if (pm->inited)
     {
@@ -42,70 +172,73 @@ static void manager_ensure_init(popup_manager_t *pm)
 
     list_init(&pm->app);
     list_init(&pm->sys);
-    pm->inited = true;
+    pm->running  = NULL;
+    pm->expiring = false;
+    pm->run_tick = 0;
+    pm->inited   = true;
 }
 
 void popup_manager_init(void)
 {
-    manager_ensure_init(&s_pm);
+    popup_manager_ensure_init(&g_popup_manager);
 }
 
-void popup_manager_open(view_t *view, popup_priority_t level, uint32_t priority)
+/* 上架: 按优先级插入对应层的 ready 链表并尝试调度 */
+static void popup_open(view_t *view, popup_priority_t level, uint32_t priority)
 {
-    popup_manager_t *pm = &s_pm;
-    list_t *list;
+    popup_manager_t *pm = &g_popup_manager;
+    popup_base_t *base;
 
-    manager_ensure_init(pm);
+    popup_manager_ensure_init(pm);
 
     if (view == NULL || view->link.owner != NULL)
     {
         return;
     }
 
-    list = level_list(pm, level);
+    base = popup_base_of(view);
+    base->level    = level;
+    base->priority = priority;
+
     list_head_init(&view->link, priority);
+    list_add_sorted(popup_level_list(pm, level), &view->link);
 
-    if (view->on_start != NULL)
-    {
-        view->on_start(view);
-    }
-
-    list_add_sorted(list, &view->link);
+    popup_schedule(pm);                   /* 入队后尝试调度(可能抢占当前运行弹窗) */
 }
 
-popup_base_t *popup_create(view_t *view, popup_priority_t level, uint32_t priority)
+/* create: 按原型分配新实例并上架(入队调度), 返回基类指针
+ * 原型可以是栈上局部变量: 先填好派生数据, 再交给管理器拷贝并上架,
+ * 这样 on_start 才能读到正确的内容。 */
+static popup_base_t *popup_create(const popup_base_t *proto, uint32_t size,
+                                  popup_priority_t level, uint32_t priority)
 {
     popup_base_t *popup;
 
-    if (view == NULL)
+    if (proto == NULL || size < sizeof(popup_base_t))
     {
         return NULL;
     }
 
-    popup = popup_base_of(view);
-    popup->level    = level;
-    popup->priority = priority;
+    popup = lv_mem_alloc(size);
 
-    popup_manager_open(view, level, priority);
+    if (popup == NULL)
+    {
+        return NULL;
+    }
+
+    memcpy(popup, proto, size);
+
+    popup_open(&popup->view, level, priority);   /* 上架: 入队并调度 */
 
     return popup;
 }
 
-popup_base_t *popup_systempopup_create(view_t *view, systempopup_priority_t priority)
+/* destroy: 停止(运行中先 on_stop 销毁控件) + 出队 + 释放动态实例内存 */
+static void popup_destroy(view_t *view)
 {
-    return popup_create(view, POPUP_LEVEL_SYS, (uint32_t)priority);
-}
+    popup_manager_t *pm = &g_popup_manager;
 
-popup_base_t *popup_apppopup_create(view_t *view, apppopup_priority_t priority)
-{
-    return popup_create(view, POPUP_LEVEL_APP, (uint32_t)priority);
-}
-
-void popup_manager_close(view_t *view)
-{
-    popup_manager_t *pm = &s_pm;
-
-    manager_ensure_init(pm);
+    popup_manager_ensure_init(pm);
 
     if (view == NULL || view->link.owner == NULL)
     {
@@ -117,48 +250,64 @@ void popup_manager_close(view_t *view)
         return;
     }
 
-    if (view->on_stop != NULL)
+    if (view == pm->running)
     {
-        view->on_stop(view);
-    }
-
-    list_delete(&view->link);
-}
-
-void popup_manager_close_all(popup_priority_t level)
-{
-    popup_manager_t *pm = &s_pm;
-    list_t *list;
-    list_head_t *node;
-
-    manager_ensure_init(pm);
-
-    list = level_list(pm, level);
-
-    /* 从优先级最高的表尾开始关 */
-    while ((node = list_last(list)) != NULL)
-    {
-        view_t *view = view_of(node);
+        pm->running  = NULL;
+        pm->expiring = false;
 
         if (view->on_stop != NULL)
         {
             view->on_stop(view);
         }
 
-        list_delete(node);
+        list_delete(&view->link);
+        popup_dispose(view);
+        popup_schedule(pm);               /* 让排队的下一个弹窗接管 */
+        return;
     }
+
+    /* 排队中(未运行)的弹窗: 控件还没创建, 直接出队释放 */
+    list_delete(&view->link);
+    popup_dispose(view);
+}
+
+void popup_manager_close_all(popup_priority_t level)
+{
+    popup_manager_t *pm = &g_popup_manager;
+    list_t *list;
+    list_head_t *node;
+
+    popup_manager_ensure_init(pm);
+
+    list = popup_level_list(pm, level);
+
+    while ((node = list_first(list)) != NULL)
+    {
+        view_t *view = popup_view_of(node);
+
+        if (view == pm->running)
+        {
+            pm->running  = NULL;
+            pm->expiring = false;
+
+            if (view->on_stop != NULL)
+            {
+                view->on_stop(view);
+            }
+        }
+
+        list_delete(node);
+        popup_dispose(view);
+    }
+
+    popup_schedule(pm);
 }
 
 view_t *popup_manager_top(popup_priority_t level)
 {
-    popup_manager_t *pm = &s_pm;
-    list_head_t *node;
+    popup_manager_ensure_init(&g_popup_manager);
 
-    manager_ensure_init(pm);
-
-    node = list_last(level_list(pm, level));
-
-    return (node != NULL) ? view_of(node) : NULL;
+    return popup_list_pick(popup_level_list(&g_popup_manager, level));
 }
 
 view_t *popup_manager_back(void)
@@ -172,7 +321,7 @@ view_t *popup_manager_back(void)
 
     if (top != NULL)
     {
-        popup_manager_close(top);
+        popup_destroy(top);
     }
 
     return top;
@@ -189,19 +338,44 @@ bool popup_manager_is_open(view_t *view)
 
     owner = view->link.owner;
 
-    return (owner == &s_pm.app || owner == &s_pm.sys);
+    return (owner == &g_popup_manager.app || owner == &g_popup_manager.sys);
 }
 
 void popup_manager_tick(void)
 {
-    popup_manager_t *pm = &s_pm;
+    popup_manager_t *pm = &g_popup_manager;
     list_head_t *node;
 
-    manager_ensure_init(pm);
+    popup_manager_ensure_init(pm);
+
+    /* 存活时间到点: 让弹窗自己退场(有回调), 否则直接关闭 */
+    if (pm->running != NULL && !pm->expiring)
+    {
+        popup_base_t *base = popup_base_of(pm->running);
+
+        if (base->value > 0 && lv_tick_elaps(pm->run_tick) >= base->value)
+        {
+            if (base->request_close != NULL)
+            {
+                if (base->request_close(pm->running))
+                {
+                    pm->expiring = true;
+                }
+                else
+                {
+                    pm->run_tick = lv_tick_get();   /* 这次没退出, 重新计时 */
+                }
+            }
+            else
+            {
+                popup_destroy(pm->running);
+            }
+        }
+    }
 
     list_for_each(node, &pm->app)
     {
-        view_t *view = view_of(node);
+        view_t *view = popup_view_of(node);
 
         if (view->on_update != NULL)
         {
@@ -211,7 +385,7 @@ void popup_manager_tick(void)
 
     list_for_each(node, &pm->sys)
     {
-        view_t *view = view_of(node);
+        view_t *view = popup_view_of(node);
 
         if (view->on_update != NULL)
         {

@@ -189,7 +189,7 @@ static void home_init(view_t *self)
     /* ==================== 相机启动按钮 ==================== */
     lv_obj_t *camera_btn = lv_btn_create(object);
     lv_obj_set_size(camera_btn, 60, 60);
-    lv_obj_set_pos(camera_btn, 35, 130);
+    lv_obj_set_pos(camera_btn, 35, 210);
 
     lv_obj_t *camera_label = lv_label_create(camera_btn);
     lv_label_set_text(camera_label, "CAM");
@@ -200,7 +200,7 @@ static void home_init(view_t *self)
     /* ==================== 命令行页面按钮 ==================== */
     lv_obj_t *shell_btn = lv_btn_create(object);
     lv_obj_set_size(shell_btn, 60, 60);
-    lv_obj_set_pos(shell_btn, 130, 130);
+    lv_obj_set_pos(shell_btn, 130, 210);
 
     lv_obj_t *shell_label = lv_label_create(shell_btn);
     lv_label_set_text(shell_label, "shell");
@@ -211,7 +211,7 @@ static void home_init(view_t *self)
     /* ==================== 视频页面按钮 ==================== */
     lv_obj_t *video_btn = lv_btn_create(object);
     lv_obj_set_size(video_btn, 60, 60);
-    lv_obj_set_pos(video_btn, 225, 130);
+    lv_obj_set_pos(video_btn, 225, 210);
 
     lv_obj_t *video_label = lv_label_create(video_btn);
     lv_label_set_text(video_label, "VIDEO");
@@ -222,7 +222,7 @@ static void home_init(view_t *self)
     /* ==================== U盘模式按钮 ==================== */
     lv_obj_t *usb_btn = lv_btn_create(object);
     lv_obj_set_size(usb_btn, 60, 60);
-    lv_obj_set_pos(usb_btn, 35, 210);
+    lv_obj_set_pos(usb_btn, 35, 290);
 
     lv_obj_t *usb_label = lv_label_create(usb_btn);
     lv_label_set_text(usb_label, "USB");
@@ -233,7 +233,7 @@ static void home_init(view_t *self)
     /* ==================== 录音页按钮 ==================== */
     lv_obj_t *recorder_btn = lv_btn_create(object);
     lv_obj_set_size(recorder_btn, 60, 60);
-    lv_obj_set_pos(recorder_btn, 130, 210);
+    lv_obj_set_pos(recorder_btn, 130, 290);
 
     lv_obj_t *recorder_label = lv_label_create(recorder_btn);
     lv_label_set_text(recorder_label, "REC");
@@ -244,7 +244,7 @@ static void home_init(view_t *self)
     /* ==================== WiFi连接页按钮 ==================== */
     lv_obj_t *wifi_btn = lv_btn_create(object);
     lv_obj_set_size(wifi_btn, 60, 60);
-    lv_obj_set_pos(wifi_btn, 225, 210);
+    lv_obj_set_pos(wifi_btn, 225, 290);
 
     lv_obj_t *wifi_label = lv_label_create(wifi_btn);
     lv_label_set_text(wifi_label, "WIFI");
@@ -252,10 +252,10 @@ static void home_init(view_t *self)
 
     lv_obj_add_event_cb(wifi_btn, wifi_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
-    /* ==================== 三种弹窗测试按钮(第三行, 与上方网格对齐) ==================== */
+    /* ==================== 三种弹窗测试按钮(第一行, 放在页面最上面) ==================== */
     lv_obj_t *msg_btn = lv_btn_create(object);
     lv_obj_set_size(msg_btn, 60, 60);
-    lv_obj_set_pos(msg_btn, 35, 290);
+    lv_obj_set_pos(msg_btn, 35, 50);
 
     lv_obj_t *msg_label = lv_label_create(msg_btn);
     lv_label_set_text(msg_label, "MSG");
@@ -265,7 +265,7 @@ static void home_init(view_t *self)
 
     lv_obj_t *dialog_btn = lv_btn_create(object);
     lv_obj_set_size(dialog_btn, 60, 60);
-    lv_obj_set_pos(dialog_btn, 130, 290);
+    lv_obj_set_pos(dialog_btn, 130, 50);
 
     lv_obj_t *dialog_label = lv_label_create(dialog_btn);
     lv_label_set_text(dialog_label, "DIALOG");
@@ -275,7 +275,7 @@ static void home_init(view_t *self)
 
     lv_obj_t *toast_btn = lv_btn_create(object);
     lv_obj_set_size(toast_btn, 60, 60);
-    lv_obj_set_pos(toast_btn, 225, 290);
+    lv_obj_set_pos(toast_btn, 225, 50);
 
     lv_obj_t *toast_label = lv_label_create(toast_btn);
     lv_label_set_text(toast_label, "TOAST");
@@ -283,10 +283,10 @@ static void home_init(view_t *self)
 
     lv_obj_add_event_cb(toast_btn, toast_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
-    /* ==================== 系统级弹窗测试按钮(第四行居中) ==================== */
+    /* ==================== 系统级弹窗测试按钮(第二行居中) ==================== */
     lv_obj_t *msg2_btn = lv_btn_create(object);
     lv_obj_set_size(msg2_btn, 60, 60);
-    lv_obj_set_pos(msg2_btn, 130, 370);
+    lv_obj_set_pos(msg2_btn, 130, 130);
 
     lv_obj_t *msg2_label = lv_label_create(msg2_btn);
     lv_label_set_text(msg2_label, "MSG2");

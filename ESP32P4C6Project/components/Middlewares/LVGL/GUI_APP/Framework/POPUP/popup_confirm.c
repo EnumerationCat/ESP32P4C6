@@ -2,9 +2,8 @@
  * @file popup_confirm.c
  * @brief 底部双按钮确认弹窗实现: 应用级, 控件挂在 lv_layer_top()
  *
- * 生命周期由 popup_manager 管理:
- *   open  -> on_start 创建控件并滑入, 按 POPUP_LEVEL_APP 入队
- *   close -> on_stop 删除控件, 不影响页面栈
+ * 每次 popup_confirm_show() 都新建一个独立实例(lv_mem_alloc), 多个实例
+ * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 dispose 释放。
  * 本文件所有函数都必须在 LVGL 任务中调用。
  */
 
@@ -30,10 +29,11 @@
 #define POPUP_BTN_H                44
 #define POPUP_BTN_MARGIN           20
 
-/* 底部确认弹窗 */
-typedef struct
+/* 底部确认弹窗(每次 show 创建一个实例) */
+typedef struct popup_confirm_ui
 {
     popup_base_t base;                                  /* 弹窗基类(必须放第一位) */
+    struct popup_confirm_ui *next;                      /* 实例链表(hide/visible 遍历) */
     lv_obj_t *mask;                                     /* 全屏遮罩(模态, 挡住底层点击) */
     lv_obj_t *panel;                                    /* 底部面板 */
     lv_obj_t *desc;                                     /* 居中描述文本 */
@@ -57,13 +57,16 @@ typedef struct
 static void confirm_on_start(view_t *self);
 static void confirm_on_stop(view_t *self);
 static void confirm_slide_in(popup_confirm_ui_t *ui);
+static bool confirm_hide_instance(popup_confirm_ui_t *ui);
+static void confirm_dispose(view_t *self);
 static void confirm_out_ready_cb(lv_anim_t *a);
 static void confirm_btn_event_cb(lv_event_t *e);
 
 /**********************
  *  STATIC VARIABLES
  **********************/
-static popup_confirm_ui_t s_confirm =
+/* 实例模板: show 时拷贝一份再填数据 */
+static const popup_confirm_ui_t s_confirm_template =
 {
     .base =
     {
@@ -76,8 +79,12 @@ static popup_confirm_ui_t s_confirm =
         },
         .level    = POPUP_LEVEL_APP,
         .priority = APP_PRIORITY0,
+        .value    = 0,                              /* 常驻, 由用户点击按钮关闭 */
+        .dispose  = confirm_dispose,
     },
 };
+
+static popup_confirm_ui_t *s_instances;                 /* 存活实例链表头 */
 
 /**********************
  *   内部辅助
@@ -89,9 +96,9 @@ static inline popup_confirm_ui_t *confirm_ui(view_t *self)
     return container_of(popup_base_of(self), popup_confirm_ui_t, base);
 }
 
-/* 纵向滑动动画(Y方向), ready可为NULL */
+/* 纵向滑动动画(Y方向), ready/user_data可为NULL */
 static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
-                          lv_anim_ready_cb_t ready)
+                          lv_anim_ready_cb_t ready, void *user_data)
 {
     lv_anim_t a;
 
@@ -101,6 +108,7 @@ static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
     lv_anim_set_values(&a, from, to);
     lv_anim_set_time(&a, POPUP_ANIM_MS);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_user_data(&a, user_data);
 
     if (ready != NULL)
     {
@@ -112,8 +120,12 @@ static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
 
 static void confirm_out_ready_cb(lv_anim_t *a)
 {
-    (void)a;
-    popup_manager_close(&s_confirm.base.view);
+    popup_confirm_ui_t *ui = lv_anim_get_user_data(a);
+
+    if (ui != NULL)
+    {
+        g_popup_manager.destroy(&ui->base.view);
+    }
 }
 
 /* 从屏幕下方滑入到停靠位置 */
@@ -121,36 +133,63 @@ static void confirm_slide_in(popup_confirm_ui_t *ui)
 {
     lv_anim_del(ui->panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_obj_set_y(ui->panel, LV_VER_RES);
-    popup_slide_y(ui->panel, LV_VER_RES, POPUP_CONFIRM_REST_Y, NULL);
+    popup_slide_y(ui->panel, LV_VER_RES, POPUP_CONFIRM_REST_Y, NULL, NULL);
     ui->hiding = false;
 }
 
-/* 更新按钮文字(NULL按空串处理) */
-static void confirm_set_btn_text(lv_obj_t *label, const char *text)
+/* 收回一个实例: 运行中则滑出(返回true), 排队中则直接出队释放(返回false) */
+static bool confirm_hide_instance(popup_confirm_ui_t *ui)
 {
-    if (label != NULL)
+    if (!ui->visible)
     {
-        lv_label_set_text(label, (text != NULL) ? text : "");
+        if (popup_manager_is_open(&ui->base.view))
+        {
+            g_popup_manager.destroy(&ui->base.view);   /* 出队并释放 */
+        }
+
+        return false;
     }
+
+    if (ui->hiding)
+    {
+        return false;
+    }
+
+    ui->hiding = true;
+
+    lv_anim_del(ui->panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
+    popup_slide_y(ui->panel, lv_obj_get_y(ui->panel),
+                  LV_VER_RES, confirm_out_ready_cb, ui);
+
+    return true;
 }
 
-/* 按钮点击: 先跑回调(回调里可能切页, 切页会自动收掉弹窗), 再滑出关闭 */
+/* 按钮点击: 先开始退场, 再跑回调; 回调之后不再访问 ui
+ * (回调里可能切页, 切页会同步关闭并释放本实例) */
 static void confirm_btn_event_cb(lv_event_t *e)
 {
     popup_confirm_ui_t *ui = (popup_confirm_ui_t *)lv_event_get_user_data(e);
     lv_obj_t *btn = lv_event_get_target(e);
-    popup_action_cb_t cb = (btn == ui->right_btn) ? ui->right_cb : ui->left_cb;
-    void *user_data = ui->user_data;
+    popup_action_cb_t cb;
+    void *user_data;
+
+    if (ui->hiding)
+    {
+        return;
+    }
+
+    cb        = (btn == ui->right_btn) ? ui->right_cb : ui->left_cb;
+    user_data = ui->user_data;
+
+    confirm_hide_instance(ui);
 
     if (cb != NULL)
     {
-        cb(user_data);
+        cb(user_data);              /* 之后不要再碰 ui */
     }
-
-    popup_confirm_hide();
 }
 
-/* 创建确认弹窗控件(启动时调用) */
+/* 创建确认弹窗控件(开始运行时调用) */
 static void confirm_on_start(view_t *self)
 {
     popup_confirm_ui_t *ui = confirm_ui(self);
@@ -213,7 +252,7 @@ static void confirm_on_start(view_t *self)
     confirm_slide_in(ui);
 }
 
-/* 删除确认弹窗控件 */
+/* 删除确认弹窗控件(实例内存由 dispose 释放) */
 static void confirm_on_stop(view_t *self)
 {
     popup_confirm_ui_t *ui = confirm_ui(self);
@@ -239,6 +278,24 @@ static void confirm_on_stop(view_t *self)
     ui->hiding      = false;
 }
 
+/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_dispose 统一释放 */
+static void confirm_dispose(view_t *self)
+{
+    popup_confirm_ui_t *ui = confirm_ui(self);
+    popup_confirm_ui_t **pp = &s_instances;
+
+    while (*pp != NULL)
+    {
+        if (*pp == ui)
+        {
+            *pp = ui->next;
+            break;
+        }
+
+        pp = &(*pp)->next;
+    }
+}
+
 void popup_confirm_show(const char *desc,
                         const char *left_text,
                         const char *right_text,
@@ -246,56 +303,59 @@ void popup_confirm_show(const char *desc,
                         popup_action_cb_t right_cb,
                         void *user_data)
 {
+    popup_confirm_ui_t proto = s_confirm_template;   /* 先填好数据再上架 */
+    popup_confirm_ui_t *ui;
+
     if (desc == NULL)
     {
         return;
     }
 
-    strlcpy(s_confirm.desc_text, desc, sizeof(s_confirm.desc_text));
-    strlcpy(s_confirm.left_text, (left_text != NULL) ? left_text : "",
-            sizeof(s_confirm.left_text));
-    strlcpy(s_confirm.right_text, (right_text != NULL) ? right_text : "",
-            sizeof(s_confirm.right_text));
-    s_confirm.left_cb   = left_cb;
-    s_confirm.right_cb  = right_cb;
-    s_confirm.user_data = user_data;
+    strlcpy(proto.desc_text, desc, sizeof(proto.desc_text));
+    strlcpy(proto.left_text, (left_text != NULL) ? left_text : "",
+            sizeof(proto.left_text));
+    strlcpy(proto.right_text, (right_text != NULL) ? right_text : "",
+            sizeof(proto.right_text));
+    proto.left_cb   = left_cb;
+    proto.right_cb  = right_cb;
+    proto.user_data = user_data;
 
-    if (s_confirm.visible)
+    ui = (popup_confirm_ui_t *)g_popup_manager.create(
+             &proto.base, sizeof(proto), POPUP_LEVEL_APP, APP_PRIORITY0);
+
+    if (ui == NULL)
     {
-        if (s_confirm.desc != NULL)
-        {
-            lv_label_set_text(s_confirm.desc, s_confirm.desc_text);
-        }
-
-        confirm_set_btn_text(s_confirm.left_label, s_confirm.left_text);
-        confirm_set_btn_text(s_confirm.right_label, s_confirm.right_text);
-
-        if (s_confirm.hiding)
-        {
-            confirm_slide_in(&s_confirm);       /* 收回途中又显示: 重新滑入 */
-        }
-
         return;
     }
 
-    popup_apppopup_create(&s_confirm.base.view, APP_PRIORITY0);
+    ui->next    = s_instances;                       /* 登记到本类型实例链表 */
+    s_instances = ui;
 }
 
 void popup_confirm_hide(void)
 {
-    if (!s_confirm.visible || s_confirm.hiding)
+    popup_confirm_ui_t *ui = s_instances;
+
+    while (ui != NULL)
     {
-        return;
+        popup_confirm_ui_t *next = ui->next;    /* 排队实例可能被立即释放 */
+
+        confirm_hide_instance(ui);
+        ui = next;
     }
-
-    s_confirm.hiding = true;
-
-    lv_anim_del(s_confirm.panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
-    popup_slide_y(s_confirm.panel, lv_obj_get_y(s_confirm.panel),
-                  LV_VER_RES, confirm_out_ready_cb);
 }
 
 bool popup_confirm_visible(void)
 {
-    return s_confirm.visible;
+    popup_confirm_ui_t *ui;
+
+    for (ui = s_instances; ui != NULL; ui = ui->next)
+    {
+        if (ui->visible)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }

@@ -1,20 +1,25 @@
 /**
  * @file popup_manager.h
- * @brief 弹窗管理器(Framework/Manage): 应用级/系统级两层优先队列
+ * @brief 弹窗管理器(Framework/Manage): 模仿 FreeRTOS 任务的抢占式调度
  *
  * 与 page_manager 的分工:
  *   page_manager  : 只管理页面(ready/paused), 负责页面切换与挂起恢复;
  *   popup_manager : 只管理弹窗, 打开/关闭弹窗不会暂停页面, 也不改变页面栈。
  *
- * 两层弹窗:
+ * 调度模型(两条不同优先级的 ready 链表, sys 整层高于 app):
  *   POPUP_LEVEL_APP: 应用级, 随页面切换由 manager_gopage() 清空;
- *                    控件绘制在 lv_layer_top(), 覆盖当前页面。
- *   POPUP_LEVEL_SYS: 系统级, 跨页面保留, 可打断应用级弹窗;
- *                    控件绘制在 lv_layer_sys(), 永远在最上层
- *                    (LVGL 输入也是先查 sys 层, 再查 top 层, 最后查屏幕)。
+ *   POPUP_LEVEL_SYS: 系统级, 跨页面保留, 任何 sys 弹窗都能抢占 app 弹窗。
  *
- * 两个队列都按 priority 升序排列, 表尾优先级最高。
- * 弹窗对象必须是长期存活的 view_t(静态/全局), 管理器只串指针, 不负责内存。
+ *   - 同一时刻只有一个弹窗在"运行"(已调 on_start, 显示中), 其余在链表中排队;
+ *   - 抢占: 新弹窗严格高于当前运行者(先层级后 priority)时, 当前弹窗被直接
+ *           关闭(调 on_stop 销毁控件并出队), 高优先级退出后不再恢复;
+ *   - 同优先级: 不抢占, 后来的 FIFO 排队, 等前面的退出后轮到自己;
+ *   - 存活时间: popup_base.value(ms), 只在运行时倒计时;
+ *           到点调 request_close 让弹窗退场, 0 表示常驻。
+ *
+ * 每条链表都按 priority 升序排列, 表尾优先级最高。
+ * 管理器只串指针、不负责内存: 动态实例(每次 show 新建)由弹窗在
+ * popup_base.dispose 中自行释放, 静态实例保持 dispose=NULL。
  * 所有接口只能在 LVGL 任务中调用。
  */
 
@@ -51,6 +56,27 @@ typedef enum
 /* 弹窗基类(定义见 POPUP/popup_base.h, 这里只前向声明指针) */
 struct popup_base;
 
+/* 弹窗管理器(全局唯一实例 g_popup_manager, 定义在 popup_manager.c) */
+typedef struct
+{
+    bool     inited;                    /* 两条链表是否已初始化 */
+    list_t   app;                       /* 应用级 ready 链表(priority 升序) */
+    list_t   sys;                       /* 系统级 ready 链表(priority 升序) */
+    view_t  *running;                   /* 当前运行的弹窗; NULL=空闲 */
+    uint32_t run_tick;                  /* 本次运行开始的时间戳(存活时间起点) */
+    bool     expiring;                  /* running 已到期, 正在播退场动画 */
+
+    /* 统一的弹窗生命周期方法(统一走 g_popup_manager.create / .destroy):
+     *   create : 按模板分配实例 + 记录层级/优先级 + 上架(入队调度), 返回基类指针;
+     *   destroy: 停止(运行中先 on_stop) + 出队 + 释放动态实例内存。 */
+    struct popup_base *(*create)(const struct popup_base *proto, uint32_t size,
+                                 popup_priority_t level, uint32_t priority);
+    void (*destroy)(view_t *view);
+} popup_manager_t;
+
+/* 全局唯一的弹窗管理器实例(定义在 popup_manager.c) */
+extern popup_manager_t g_popup_manager;
+
 
 
 
@@ -63,56 +89,31 @@ struct popup_base;
  */
 void popup_manager_init(void);
 
-/**
- * @brief       打开弹窗: 调 on_start 后按优先级插入对应层
- * @note        已在任一队列上的对象会被忽略
- * @param       view:     弹窗对象
- * @param       level:    所属层(应用级/系统级)
- * @param       priority: 同层内优先级(数值越大越靠上)
- * @retval      无
+/*
+ * 统一的生命周期入口(方法, 便于调用方一眼看全):
+ *   1) 先准备一份"原型"(模板的浅拷贝, 把派生数据填好, 如文字/回调);
+ *   2) create 会按原型分配一个新实例并上架(入队调度), 原型可以是栈上局部变量:
+ *
+ *        popup_notice_ui_t proto = s_notice_template;   // 已填好数据
+ *        popup_notice_ui_t *ui = (popup_notice_ui_t *)
+ *            g_popup_manager.create(&proto.base, sizeof(proto),
+ *                                   POPUP_LEVEL_SYS, SYSTEM_PRIORITY0);
+ *
+ *      create 返回 NULL 表示分配失败; 返回值第一个成员是 popup_base_t。
+ *      create 内部会立刻(或在排到队首时)调用 on_start, 因此派生数据必须在
+ *      create 之前填好(所以走"原型"), 否则 on_start 拿到的是空数据。
+ *
+ *   3) 需要主动结束时:
+ *
+ *        g_popup_manager.destroy(&ui->base.view);
+ *
+ *      destroy = 停止(运行中先 on_stop 销毁控件) + 出队 + 释放实例内存(动态实例)。
+ *      静态实例(dispose==NULL)只出队不释放。
+ *
+ *   注意: 管理器的释放会先调用弹窗的 popup_base.dispose 做类型清理(如从
+ *         本类型实例链表摘除), 再统一 lv_mem_free, 所以 dispose 里不要再释放内存。
+ *   两者都只能在 LVGL 任务中调用。
  */
-void popup_manager_open(view_t *view, popup_priority_t level, uint32_t priority);
-
-/**
- * @brief       创建(打开)一个弹窗, 层级/优先级显式指定
- * @note        view 必须内嵌在 popup_base_t 中(即弹窗从 popup_base_t 派生),
- *              本函数会通过 container_of 还原 popup_base_t 并记录 level/priority
- * @param       view:     弹窗的 view_t 指针(&popup->base.view)
- * @param       level:    所属层(应用级/系统级)
- * @param       priority: 层内优先级(数值越大越靠上)
- * @retval      popup_base_t指针; view为NULL时返回NULL
- */
-struct popup_base *popup_create(view_t *view, popup_priority_t level,
-                                uint32_t priority);
-
-/**
- * @brief       创建(打开)一个系统级弹窗
- * @note        等价于 popup_create(view, POPUP_LEVEL_SYS, priority);
- *              跨页面保留, 控件应绘制在 lv_layer_sys()
- * @param       view:     弹窗的 view_t 指针(&popup->base.view)
- * @param       priority: 系统级队列内优先级(数值越大越靠上)
- * @retval      popup_base_t指针; view为NULL时返回NULL
- */
-struct popup_base *popup_systempopup_create(view_t *view,
-                                            systempopup_priority_t priority);
-
-/**
- * @brief       创建(打开)一个应用级弹窗
- * @note        等价于 popup_create(view, POPUP_LEVEL_APP, priority);
- *              随页面切换关闭, 控件应绘制在 lv_layer_top()
- * @param       view:     弹窗的 view_t 指针(&popup->base.view)
- * @param       priority: 应用级队列内优先级(数值越大越靠上)
- * @retval      popup_base_t指针; view为NULL时返回NULL
- */
-struct popup_base *popup_apppopup_create(view_t *view,
-                                         apppopup_priority_t priority);
-
-/**
- * @brief       关闭指定弹窗: 调 on_stop 后从队列移除
- * @param       view: 弹窗对象(不在队列中则忽略)
- * @retval      无
- */
-void popup_manager_close(view_t *view);
 
 /**
  * @brief       关闭某一层的所有弹窗(从优先级最高的开始)
@@ -144,8 +145,8 @@ view_t *popup_manager_back(void);
 bool popup_manager_is_open(view_t *view);
 
 /**
- * @brief       周期刷新: 依次调用所有弹窗的 on_update
- * @note        压在下面的弹窗也会刷新; on_update 里不要关闭弹窗
+ * @brief       周期调度: 检查存活时间到期 + 依次调用所有弹窗的 on_update
+ * @note        排队中的弹窗也会刷新 on_update; on_update 里不要关闭弹窗
  * @param       无
  * @retval      无
  */

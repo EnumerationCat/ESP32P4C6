@@ -2,9 +2,8 @@
  * @file popup_notice.c
  * @brief 顶部滑入提示弹窗实现: 系统级, 控件挂在 lv_layer_sys()
  *
- * 生命周期由 popup_manager 管理:
- *   open  -> on_start 创建控件并滑入, 按 POPUP_LEVEL_SYS 入队
- *   close -> on_stop 删除控件, 不影响页面栈
+ * 每次 popup_notice_show() 都新建一个独立实例(lv_mem_alloc), 多个实例
+ * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 dispose 释放。
  * 本文件所有函数都必须在 LVGL 任务中调用。
  */
 
@@ -26,17 +25,16 @@
 #define POPUP_NOTICE_MARGIN_X      ((LV_HOR_RES - POPUP_NOTICE_W) / 2)
 #define POPUP_NOTICE_REST_Y        56
 
-/* 顶部提示弹窗 */
-typedef struct
+/* 顶部提示弹窗(每次 show 创建一个实例) */
+typedef struct popup_notice_ui
 {
     popup_base_t base;                                  /* 弹窗基类(必须放第一位) */
+    struct popup_notice_ui *next;                       /* 实例链表(hide/visible 遍历) */
     lv_obj_t *panel;                                    /* 提示面板 */
     lv_obj_t *label;                                    /* 居中文字 */
-    lv_timer_t *timer;                                  /* 自动收回定时器 */
-    bool visible;                                       /* 正在显示(含滑出过程) */
+    bool visible;                                       /* 正在运行(显示中, 含滑出过程) */
     bool hiding;                                        /* 正在滑出 */
     char text[POPUP_NOTICE_TEXT_MAX];                   /* 待显示文字(on_start前先缓存) */
-    uint32_t duration_ms;                               /* 自动收回时间, 0=常驻 */
 } popup_notice_ui_t;
 
 /**********************
@@ -45,13 +43,16 @@ typedef struct
 static void notice_on_start(view_t *self);
 static void notice_on_stop(view_t *self);
 static void notice_slide_in(popup_notice_ui_t *ui);
-static void notice_start_timer(popup_notice_ui_t *ui);
+static bool notice_hide_instance(popup_notice_ui_t *ui);
+static bool notice_request_close(view_t *self);
+static void notice_dispose(view_t *self);
 static void notice_out_ready_cb(lv_anim_t *a);
 
 /**********************
  *  STATIC VARIABLES
  **********************/
-static popup_notice_ui_t s_notice =
+/* 实例模板: show 时拷贝一份再填数据 */
+static const popup_notice_ui_t s_notice_template =
 {
     .base =
     {
@@ -62,10 +63,15 @@ static popup_notice_ui_t s_notice =
             .on_start = notice_on_start,
             .on_stop  = notice_on_stop,
         },
-        .level    = POPUP_LEVEL_SYS,
-        .priority = SYSTEM_PRIORITY0,
+        .level         = POPUP_LEVEL_SYS,
+        .priority      = SYSTEM_PRIORITY0,
+        .value         = 0,
+        .request_close = notice_request_close,
+        .dispose       = notice_dispose,
     },
 };
+
+static popup_notice_ui_t *s_instances;                  /* 存活实例链表头 */
 
 /**********************
  *   内部辅助
@@ -77,9 +83,9 @@ static inline popup_notice_ui_t *notice_ui(view_t *self)
     return container_of(popup_base_of(self), popup_notice_ui_t, base);
 }
 
-/* 纵向滑动动画(Y方向), ready可为NULL */
+/* 纵向滑动动画(Y方向), ready/user_data可为NULL */
 static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
-                          lv_anim_ready_cb_t ready)
+                          lv_anim_ready_cb_t ready, void *user_data)
 {
     lv_anim_t a;
 
@@ -89,6 +95,7 @@ static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
     lv_anim_set_values(&a, from, to);
     lv_anim_set_time(&a, POPUP_ANIM_MS);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_user_data(&a, user_data);
 
     if (ready != NULL)
     {
@@ -100,15 +107,18 @@ static void popup_slide_y(lv_obj_t *obj, int32_t from, int32_t to,
 
 static void notice_out_ready_cb(lv_anim_t *a)
 {
-    (void)a;
-    popup_manager_close(&s_notice.base.view);
+    popup_notice_ui_t *ui = lv_anim_get_user_data(a);
+
+    if (ui != NULL)
+    {
+        g_popup_manager.destroy(&ui->base.view);
+    }
 }
 
-/* 自动收回(定时器回调) */
-static void notice_timer_cb(lv_timer_t *timer)
+/* 到期退出: 由 popup_manager 调用, 开始滑出动画; 返回是否已开始退场 */
+static bool notice_request_close(view_t *self)
 {
-    (void)timer;
-    popup_notice_hide();
+    return notice_hide_instance(notice_ui(self));
 }
 
 /* 从屏幕上方滑入到停靠位置 */
@@ -116,26 +126,38 @@ static void notice_slide_in(popup_notice_ui_t *ui)
 {
     lv_anim_del(ui->panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
     lv_obj_set_y(ui->panel, -POPUP_NOTICE_HEIGHT);
-    popup_slide_y(ui->panel, -POPUP_NOTICE_HEIGHT, POPUP_NOTICE_REST_Y, NULL);
+    popup_slide_y(ui->panel, -POPUP_NOTICE_HEIGHT, POPUP_NOTICE_REST_Y, NULL, NULL);
     ui->hiding = false;
 }
 
-/* 重置自动收回定时器 */
-static void notice_start_timer(popup_notice_ui_t *ui)
+/* 收回一个实例: 运行中则滑出(返回true), 排队中则直接出队释放(返回false) */
+static bool notice_hide_instance(popup_notice_ui_t *ui)
 {
-    if (ui->timer != NULL)
+    if (!ui->visible)
     {
-        lv_timer_del(ui->timer);
-        ui->timer = NULL;
+        if (popup_manager_is_open(&ui->base.view))
+        {
+            g_popup_manager.destroy(&ui->base.view);   /* 出队并释放 */
+        }
+
+        return false;
     }
 
-    if (ui->duration_ms > 0)
+    if (ui->hiding)
     {
-        ui->timer = lv_timer_create(notice_timer_cb, ui->duration_ms, NULL);
+        return false;
     }
+
+    ui->hiding = true;
+
+    lv_anim_del(ui->panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
+    popup_slide_y(ui->panel, lv_obj_get_y(ui->panel),
+                  -POPUP_NOTICE_HEIGHT, notice_out_ready_cb, ui);
+
+    return true;
 }
 
-/* 创建提示弹窗控件(启动时调用) */
+/* 创建提示弹窗控件(开始运行时调用) */
 static void notice_on_start(view_t *self)
 {
     popup_notice_ui_t *ui = notice_ui(self);
@@ -163,19 +185,12 @@ static void notice_on_start(view_t *self)
     ui->hiding  = false;
 
     notice_slide_in(ui);
-    notice_start_timer(ui);
 }
 
-/* 删除提示弹窗控件 */
+/* 删除提示弹窗控件(实例内存由 dispose 释放) */
 static void notice_on_stop(view_t *self)
 {
     popup_notice_ui_t *ui = notice_ui(self);
-
-    if (ui->timer != NULL)
-    {
-        lv_timer_del(ui->timer);
-        ui->timer = NULL;
-    }
 
     if (ui->panel != NULL)
     {
@@ -188,56 +203,73 @@ static void notice_on_stop(view_t *self)
     ui->hiding  = false;
 }
 
+/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_dispose 统一释放 */
+static void notice_dispose(view_t *self)
+{
+    popup_notice_ui_t *ui = notice_ui(self);
+    popup_notice_ui_t **pp = &s_instances;
+
+    while (*pp != NULL)
+    {
+        if (*pp == ui)
+        {
+            *pp = ui->next;
+            break;
+        }
+
+        pp = &(*pp)->next;
+    }
+}
+
 void popup_notice_show(const char *text, uint32_t duration_ms)
 {
+    popup_notice_ui_t proto = s_notice_template;    /* 先填好数据再上架 */
+    popup_notice_ui_t *ui;
+
     if (text == NULL)
     {
         return;
     }
 
-    strlcpy(s_notice.text, text, sizeof(s_notice.text));
-    s_notice.duration_ms = duration_ms;
+    strlcpy(proto.text, text, sizeof(proto.text));
+    proto.base.value = duration_ms;                 /* 存活时间, 0=常驻 */
 
-    if (s_notice.visible)
+    ui = (popup_notice_ui_t *)g_popup_manager.create(
+             &proto.base, sizeof(proto), POPUP_LEVEL_SYS, SYSTEM_PRIORITY0);
+
+    if (ui == NULL)
     {
-        if (s_notice.label != NULL)
-        {
-            lv_label_set_text(s_notice.label, s_notice.text);
-        }
-
-        if (s_notice.hiding)
-        {
-            notice_slide_in(&s_notice);         /* 收回途中又显示: 重新滑入 */
-        }
-
-        notice_start_timer(&s_notice);
         return;
     }
 
-    popup_systempopup_create(&s_notice.base.view, SYSTEM_PRIORITY0);
+    ui->next    = s_instances;                      /* 登记到本类型实例链表 */
+    s_instances = ui;
 }
 
 void popup_notice_hide(void)
 {
-    if (!s_notice.visible || s_notice.hiding)
+    popup_notice_ui_t *ui = s_instances;
+
+    while (ui != NULL)
     {
-        return;
+        popup_notice_ui_t *next = ui->next;     /* 排队实例可能被立即释放 */
+
+        notice_hide_instance(ui);
+        ui = next;
     }
-
-    s_notice.hiding = true;
-
-    if (s_notice.timer != NULL)
-    {
-        lv_timer_del(s_notice.timer);
-        s_notice.timer = NULL;
-    }
-
-    lv_anim_del(s_notice.panel, (lv_anim_exec_xcb_t)lv_obj_set_y);
-    popup_slide_y(s_notice.panel, lv_obj_get_y(s_notice.panel),
-                  -POPUP_NOTICE_HEIGHT, notice_out_ready_cb);
 }
 
 bool popup_notice_visible(void)
 {
-    return s_notice.visible;
+    popup_notice_ui_t *ui;
+
+    for (ui = s_instances; ui != NULL; ui = ui->next)
+    {
+        if (ui->visible)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
