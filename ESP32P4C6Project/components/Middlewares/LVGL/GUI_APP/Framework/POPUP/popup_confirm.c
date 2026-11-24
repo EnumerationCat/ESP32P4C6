@@ -303,7 +303,7 @@ void popup_confirm_show(const char *desc,
                         popup_action_cb_t right_cb,
                         void *user_data)
 {
-    popup_confirm_ui_t proto = s_confirm_template;   /* 先填好数据再上架 */
+    popup_confirm_ui_t prototype = s_confirm_template;   /* 先填好数据再上架 */
     popup_confirm_ui_t *ui;
 
     if (desc == NULL)
@@ -311,17 +311,17 @@ void popup_confirm_show(const char *desc,
         return;
     }
 
-    strlcpy(proto.desc_text, desc, sizeof(proto.desc_text));
-    strlcpy(proto.left_text, (left_text != NULL) ? left_text : "",
-            sizeof(proto.left_text));
-    strlcpy(proto.right_text, (right_text != NULL) ? right_text : "",
-            sizeof(proto.right_text));
-    proto.left_cb   = left_cb;
-    proto.right_cb  = right_cb;
-    proto.user_data = user_data;
+    strlcpy(prototype.desc_text, desc, sizeof(prototype.desc_text));
+    strlcpy(prototype.left_text, (left_text != NULL) ? left_text : "",
+            sizeof(prototype.left_text));
+    strlcpy(prototype.right_text, (right_text != NULL) ? right_text : "",
+            sizeof(prototype.right_text));
+    prototype.left_cb   = left_cb;
+    prototype.right_cb  = right_cb;
+    prototype.user_data = user_data;
 
     ui = (popup_confirm_ui_t *)app_popup_create(
-             &proto.base, sizeof(proto), APP_PRIORITY0);
+             &prototype.base, sizeof(prototype), APP_PRIORITY0);
 
     if (ui == NULL)
     {

@@ -69,7 +69,7 @@ typedef struct
     /* 统一的弹窗生命周期方法(统一走 g_popup_manager.create / .destroy):
      *   create : 按模板分配实例 + 记录层级/优先级 + 上架(入队调度), 返回基类指针;
      *   destroy: 停止(运行中先 on_stop) + 出队 + 释放动态实例内存。 */
-    struct popup_base *(*create)(const struct popup_base *proto, uint32_t size,
+    struct popup_base *(*create)(const struct popup_base *prototype, uint32_t size,
                                  popup_priority_t level, uint32_t priority);
     void (*destroy)(view_t *view);
 } popup_manager_t;
@@ -94,9 +94,9 @@ void popup_manager_init(void);
  *   1) 先准备一份"原型"(模板的浅拷贝, 把派生数据填好, 如文字/回调);
  *   2) create 会按原型分配一个新实例并上架(入队调度), 原型可以是栈上局部变量:
  *
- *        popup_notice_ui_t proto = s_notice_template;   // 已填好数据
+ *        popup_notice_ui_t prototype = s_notice_template;   // 已填好数据
  *        popup_notice_ui_t *ui = (popup_notice_ui_t *)
- *            g_popup_manager.create(&proto.base, sizeof(proto),
+ *            g_popup_manager.create(&prototype.base, sizeof(prototype),
  *                                   POPUP_LEVEL_SYS, SYSTEM_PRIORITY0);
  *
  *      create 返回 NULL 表示分配失败; 返回值第一个成员是 popup_base_t。
@@ -117,27 +117,27 @@ void popup_manager_init(void);
 
 /**
  * @brief       按原型创建并上架一个系统级弹窗(create 的便捷封装)
- * @note        等价于 g_popup_manager.create(proto, size, POPUP_LEVEL_SYS, priority);
+ * @note        等价于 g_popup_manager.create(prototype, size, POPUP_LEVEL_SYS, priority);
  *              跨页面保留, 控件应绘制在 lv_layer_sys()
- * @param       proto:    实例模板(整块派生结构的原型)
+ * @param       prototype:    实例模板(整块派生结构的原型)
  * @param       size:     实例总大小(字节, 至少为 sizeof(popup_base_t))
  * @param       priority: 系统级队列内优先级(数值越大越靠上)
  * @retval      新的弹窗基类指针; 分配失败返回NULL
  */
-struct popup_base *system_popup_create(const struct popup_base *proto,
+struct popup_base *system_popup_create(const struct popup_base *prototype,
                                        uint32_t size,
                                        systempopup_priority_t priority);
 
 /**
  * @brief       按原型创建并上架一个应用级弹窗(create 的便捷封装)
- * @note        等价于 g_popup_manager.create(proto, size, POPUP_LEVEL_APP, priority);
+ * @note        等价于 g_popup_manager.create(prototype, size, POPUP_LEVEL_APP, priority);
  *              随页面切换关闭, 控件应绘制在 lv_layer_top()
- * @param       proto:    实例模板(整块派生结构的原型)
+ * @param       prototype:    实例模板(整块派生结构的原型)
  * @param       size:     实例总大小(字节, 至少为 sizeof(popup_base_t))
  * @param       priority: 应用级队列内优先级(数值越大越靠上)
  * @retval      新的弹窗基类指针; 分配失败返回NULL
  */
-struct popup_base *app_popup_create(const struct popup_base *proto,
+struct popup_base *app_popup_create(const struct popup_base *prototype,
                                     uint32_t size,
                                     apppopup_priority_t priority);
 

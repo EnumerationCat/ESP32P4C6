@@ -223,7 +223,7 @@ static void notice_dispose(view_t *self)
 
 void popup_notice_show(const char *text, uint32_t duration_ms)
 {
-    popup_notice_ui_t proto = s_notice_template;    /* 先填好数据再上架 */
+    popup_notice_ui_t prototype = s_notice_template;    /* 先填好数据再上架 */
     popup_notice_ui_t *ui;
 
     if (text == NULL)
@@ -231,11 +231,11 @@ void popup_notice_show(const char *text, uint32_t duration_ms)
         return;
     }
 
-    strlcpy(proto.text, text, sizeof(proto.text));
-    proto.base.value = duration_ms;                 /* 存活时间, 0=常驻 */
+    strlcpy(prototype.text, text, sizeof(prototype.text));
+    prototype.base.value = duration_ms;                 /* 存活时间, 0=常驻 */
 
     ui = (popup_notice_ui_t *)system_popup_create(
-             &proto.base, sizeof(proto), SYSTEM_PRIORITY0);
+             &prototype.base, sizeof(prototype), SYSTEM_PRIORITY0);
 
     if (ui == NULL)
     {

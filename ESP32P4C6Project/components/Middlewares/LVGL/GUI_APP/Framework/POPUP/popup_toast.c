@@ -232,7 +232,7 @@ static void toast_dispose(view_t *self)
 
 void popup_toast_show(const char *text, uint32_t duration_ms)
 {
-    popup_toast_ui_t proto = s_toast_template;      /* 先填好数据再上架 */
+    popup_toast_ui_t prototype = s_toast_template;      /* 先填好数据再上架 */
     popup_toast_ui_t *ui;
 
     if (text == NULL)
@@ -240,11 +240,11 @@ void popup_toast_show(const char *text, uint32_t duration_ms)
         return;
     }
 
-    strlcpy(proto.text, text, sizeof(proto.text));
-    proto.base.value = duration_ms;                 /* 存活时间, 0=常驻 */
+    strlcpy(prototype.text, text, sizeof(prototype.text));
+    prototype.base.value = duration_ms;                 /* 存活时间, 0=常驻 */
 
     ui = (popup_toast_ui_t *)system_popup_create(
-             &proto.base, sizeof(proto), SYSTEM_PRIORITY1);
+             &prototype.base, sizeof(prototype), SYSTEM_PRIORITY1);
 
     if (ui == NULL)
     {

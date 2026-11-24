@@ -25,7 +25,7 @@
 #include <string.h>
 
 /* 统一生命周期方法(经 g_popup_manager.create/destroy 暴露) */
-static popup_base_t *popup_create(const popup_base_t *proto, uint32_t size,
+static popup_base_t *popup_create(const popup_base_t *prototype, uint32_t size,
                                   popup_priority_t level, uint32_t priority);
 static void popup_destroy(view_t *view);
 
@@ -48,21 +48,26 @@ static list_t *popup_level_list(popup_manager_t *pm, popup_priority_t level)
     return (level == POPUP_LEVEL_SYS) ? &pm->sys : &pm->app;
 }
 
-/* 某一层里优先级最高(同优先级取最早入队)的弹窗 */
+/* 从一条 ready 链表里挑出"接下来该运行"的弹窗:
+ *   - 优先级(value)最高的那个;
+ *   - 若最高优先级有多个, 取最早入队的那个(FIFO)。
+ * 返回该节点对应的弹窗; 链表为空时返回 NULL。 */
 static view_t *popup_list_pick(list_t *list)
 {
     list_head_t *node;
-    list_head_t *best = NULL;
+    list_head_t *selected = NULL;   /* 扫描到目前为止优先级最高的节点 */
 
     list_for_each(node, list)
     {
-        if (best == NULL || node->value > best->value)
+        /* 只有严格更高的优先级才替换擂主:
+         * 相等时保留先遇到(即更早入队)的那个, 从而同优先级满足 FIFO。 */
+        if (selected == NULL || node->value > selected->value)
         {
-            best = node;            /* 严格大于才替换 => 同优先级 FIFO */
+            selected = node;
         }
     }
 
-    return (best != NULL) ? popup_view_of(best) : NULL;
+    return (selected != NULL) ? popup_view_of(selected) : NULL;
 }
 
 /* 全局下一个该运行的弹窗: sys 整层优先于 app */
@@ -209,12 +214,12 @@ static void popup_open(view_t *view, popup_priority_t level, uint32_t priority)
 /* create: 按原型分配新实例并上架(入队调度), 返回基类指针
  * 原型可以是栈上局部变量: 先填好派生数据, 再交给管理器拷贝并上架,
  * 这样 on_start 才能读到正确的内容。 */
-static popup_base_t *popup_create(const popup_base_t *proto, uint32_t size,
+static popup_base_t *popup_create(const popup_base_t *prototype, uint32_t size,
                                   popup_priority_t level, uint32_t priority)
 {
     popup_base_t *popup;
 
-    if (proto == NULL || size < sizeof(popup_base_t))
+    if (prototype == NULL || size < sizeof(popup_base_t))
     {
         return NULL;
     }
@@ -226,7 +231,7 @@ static popup_base_t *popup_create(const popup_base_t *proto, uint32_t size,
         return NULL;
     }
 
-    memcpy(popup, proto, size);
+    memcpy(popup, prototype, size);
 
     popup_open(&popup->view, level, priority);   /* 上架: 入队并调度 */
 
@@ -234,18 +239,18 @@ static popup_base_t *popup_create(const popup_base_t *proto, uint32_t size,
 }
 
 /* create 的系统级便捷封装 */
-popup_base_t *system_popup_create(const popup_base_t *proto, uint32_t size,
+popup_base_t *system_popup_create(const popup_base_t *prototype, uint32_t size,
                                   systempopup_priority_t priority)
 {
-    return g_popup_manager.create(proto, size, POPUP_LEVEL_SYS,
+    return g_popup_manager.create(prototype, size, POPUP_LEVEL_SYS,
                                   (uint32_t)priority);
 }
 
 /* create 的应用级便捷封装 */
-popup_base_t *app_popup_create(const popup_base_t *proto, uint32_t size,
+popup_base_t *app_popup_create(const popup_base_t *prototype, uint32_t size,
                                apppopup_priority_t priority)
 {
-    return g_popup_manager.create(proto, size, POPUP_LEVEL_APP,
+    return g_popup_manager.create(prototype, size, POPUP_LEVEL_APP,
                                   (uint32_t)priority);
 }
 
