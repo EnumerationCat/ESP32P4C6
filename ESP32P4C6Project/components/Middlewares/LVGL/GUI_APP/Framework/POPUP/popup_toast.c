@@ -3,7 +3,7 @@
  * @brief 屏幕中心提示弹窗实现: 系统级, 控件挂在 lv_layer_sys()
  *
  * 每次 popup_toast_show() 都新建一个独立实例(lv_mem_alloc), 多个实例
- * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 dispose 释放。
+ * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 request_delete 释放。
  * 本文件所有函数都必须在 LVGL 任务中调用。
  */
 
@@ -65,7 +65,7 @@ static const popup_toast_ui_t s_toast_template =
         .priority      = SYSTEM_PRIORITY1,
         .value         = 0,
         .request_close = toast_request_close,
-        .dispose       = toast_dispose,
+        .request_delete       = toast_dispose,
     },
 };
 
@@ -196,7 +196,7 @@ static void toast_on_start(view_t *self)
     toast_fade_in(ui);
 }
 
-/* 删除提示弹窗控件(实例内存由 dispose 释放) */
+/* 删除提示弹窗控件(实例内存由 request_delete 释放) */
 static void toast_on_stop(view_t *self)
 {
     popup_toast_ui_t *ui = toast_ui(self);

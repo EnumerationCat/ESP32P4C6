@@ -62,7 +62,7 @@ typedef struct popup_base
     /* 类型清理钩子: 弹窗从管理器出队时调用, 实例在此做类型级清理
      * (如从本类型实例链表摘除); 内存由管理器销毁流程统一 lv_mem_free,
      * 这里不要自行释放。静态实例保持 NULL(只出队不释放)。 */
-    void (*dispose)(view_t *view);
+    void (*request_delete)(view_t *view);
 } popup_base_t;
 
 /**

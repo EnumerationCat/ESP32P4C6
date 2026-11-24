@@ -3,7 +3,7 @@
  * @brief 顶部滑入提示弹窗实现: 系统级, 控件挂在 lv_layer_sys()
  *
  * 每次 popup_notice_show() 都新建一个独立实例(lv_mem_alloc), 多个实例
- * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 dispose 释放。
+ * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 request_delete 释放。
  * 本文件所有函数都必须在 LVGL 任务中调用。
  */
 
@@ -67,7 +67,7 @@ static const popup_notice_ui_t s_notice_template =
         .priority      = SYSTEM_PRIORITY0,
         .value         = 0,
         .request_close = notice_request_close,
-        .dispose       = notice_dispose,
+        .request_delete       = notice_dispose,
     },
 };
 
@@ -187,7 +187,7 @@ static void notice_on_start(view_t *self)
     notice_slide_in(ui);
 }
 
-/* 删除提示弹窗控件(实例内存由 dispose 释放) */
+/* 删除提示弹窗控件(实例内存由 request_delete 释放) */
 static void notice_on_stop(view_t *self)
 {
     popup_notice_ui_t *ui = notice_ui(self);

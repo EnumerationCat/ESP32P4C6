@@ -3,7 +3,7 @@
  * @brief 底部双按钮确认弹窗实现: 应用级, 控件挂在 lv_layer_top()
  *
  * 每次 popup_confirm_show() 都新建一个独立实例(lv_mem_alloc), 多个实例
- * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 dispose 释放。
+ * 在 popup_manager 的 ready 链表里按优先级排队/抢占, 出队后由 request_delete 释放。
  * 本文件所有函数都必须在 LVGL 任务中调用。
  */
 
@@ -80,7 +80,7 @@ static const popup_confirm_ui_t s_confirm_template =
         .level    = POPUP_LEVEL_APP,
         .priority = APP_PRIORITY0,
         .value    = 0,                              /* 常驻, 由用户点击按钮关闭 */
-        .dispose  = confirm_dispose,
+        .request_delete  = confirm_dispose,
     },
 };
 
@@ -252,7 +252,7 @@ static void confirm_on_start(view_t *self)
     confirm_slide_in(ui);
 }
 
-/* 删除确认弹窗控件(实例内存由 dispose 释放) */
+/* 删除确认弹窗控件(实例内存由 request_delete 释放) */
 static void confirm_on_stop(view_t *self)
 {
     popup_confirm_ui_t *ui = confirm_ui(self);

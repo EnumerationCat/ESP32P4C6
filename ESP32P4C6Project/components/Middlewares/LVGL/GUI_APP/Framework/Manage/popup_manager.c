@@ -3,7 +3,7 @@
  * @brief 弹窗管理器实现: 模仿 FreeRTOS 任务调度
  *
  * 调度模型:
- *   app / sys 两条按 priority 升序排列的 ready 链表, sys 整体优先级高于 app;
+ *   app / sys 两条按 priority 升序排列的 ready 链表, sys 整体优先级高于 app,同优先级FIFO;
  *   同一时刻只有一个弹窗"运行"(显示中, 已调 on_start), 其余在 ready 链表排队。
  *
  *   - 抢占: 新弹窗严格高于当前运行弹窗(先比层级 sys>app, 再比 priority)时,
@@ -68,19 +68,19 @@ static list_t *popup_level_list(popup_manager_t *pm, popup_priority_t level)
 static view_t *popup_list_pick(list_t *list)
 {
     list_head_t *node;
-    list_head_t *selected = NULL;   /* 扫描到目前为止优先级最高的节点 */
+    list_head_t *nextnode = NULL;   /* 扫描到目前为止优先级最高的节点 */
 
     list_for_each(node, list)
     {
         /* 只有严格更高的优先级才替换擂主:
          * 相等时保留先遇到(即更早入队)的那个, 从而同优先级满足 FIFO。 */
-        if (selected == NULL || node->value > selected->value)
+        if (nextnode == NULL || node->value > nextnode->value)
         {
-            selected = node;
+            nextnode = node;
         }
     }
 
-    return (selected != NULL) ? popup_view_of(selected) : NULL;
+    return (nextnode != NULL) ? popup_view_of(nextnode) : NULL;
 }
 
 /**
@@ -136,19 +136,19 @@ static void popup_start_running(popup_manager_t *pm, view_t *view)
 
 /**
  * @brief       出队后释放弹窗实例
- * @note        dispose==NULL 视为静态实例, 只出队不释放; 动态实例先调用类型
+ * @note        request_delete==NULL 视为静态实例, 只出队不释放; 动态实例先调用类型
  *              清理钩子(从本类型实例链表摘除), 再由管理器统一 lv_mem_free
  * @param       view: 待释放的弹窗视图
  * @retval      无
  */
-static void popup_dispose(view_t *view)
+static void popup_delete(view_t *view)
 {
     popup_base_t *base = popup_base_of(view);
 
-    /* 静态实例 dispose==NULL, 只出队不释放; 动态实例走类型清理后统一释放 */
-    if (base->dispose != NULL)
+    /* 静态实例 request_delete==NULL, 只出队不释放; 动态实例走类型清理后统一释放 */
+    if (base->request_delete != NULL)
     {
-        base->dispose(view);
+        base->request_delete(view);
         lv_mem_free(base);
     }
 }
@@ -177,7 +177,7 @@ static void popup_preempt_running(popup_manager_t *pm)
     }
 
     list_delete(&preempted->link);
-    popup_dispose(preempted);
+    popup_delete(preempted);
 }
 
 /**
@@ -368,14 +368,14 @@ static void popup_destroy(view_t *view)
         }
 
         list_delete(&view->link);
-        popup_dispose(view);
+        popup_delete(view);
         popup_schedule(pm);               /* 让排队的下一个弹窗接管 */
         return;
     }
 
     /* 排队中(未运行)的弹窗: 控件还没创建, 直接出队释放 */
     list_delete(&view->link);
-    popup_dispose(view);
+    popup_delete(view);
 }
 
 /**
@@ -409,7 +409,7 @@ void popup_manager_close_all(popup_priority_t level)
         }
 
         list_delete(node);
-        popup_dispose(view);
+        popup_delete(view);
     }
 
     popup_schedule(pm);

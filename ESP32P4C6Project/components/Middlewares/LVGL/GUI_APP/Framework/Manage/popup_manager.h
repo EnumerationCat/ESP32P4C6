@@ -19,7 +19,7 @@
  *
  * 每条链表都按 priority 升序排列, 表尾优先级最高。
  * 管理器只串指针、不负责内存: 动态实例(每次 show 新建)由弹窗在
- * popup_base.dispose 中自行释放, 静态实例保持 dispose=NULL。
+ * popup_base.request_delete 中自行释放, 静态实例保持 request_delete=NULL。
  * 所有接口只能在 LVGL 任务中调用。
  */
 
@@ -108,10 +108,10 @@ void popup_manager_init(void);
  *        g_popup_manager.destroy(&ui->base.view);
  *
  *      destroy = 停止(运行中先 on_stop 销毁控件) + 出队 + 释放实例内存(动态实例)。
- *      静态实例(dispose==NULL)只出队不释放。
+ *      静态实例(request_delete==NULL)只出队不释放。
  *
- *   注意: 管理器的释放会先调用弹窗的 popup_base.dispose 做类型清理(如从
- *         本类型实例链表摘除), 再统一 lv_mem_free, 所以 dispose 里不要再释放内存。
+ *   注意: 管理器的释放会先调用弹窗的 popup_base.request_delete 做类型清理(如从
+ *         本类型实例链表摘除), 再统一 lv_mem_free, 所以 request_delete 里不要再释放内存。
  *   两者都只能在 LVGL 任务中调用。
  */
 
