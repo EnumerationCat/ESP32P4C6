@@ -1,4 +1,5 @@
 set(src_dirs
+            .
             LED
             LCD
             I2C_BUS
@@ -12,6 +13,7 @@ set(src_dirs
             USB)
 
 set(include_dirs
+            .
             LED
             LCD
             I2C_BUS

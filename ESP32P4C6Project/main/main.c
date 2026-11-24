@@ -2,31 +2,19 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "touch.h"
-#include "led.h"
-#include "lcd.h"
+#include "hardware_init.h"
 #include "lvgl.h"
 #include "lv_port_disp.h"
 #include "lv_port_indev.h"
 #include "lv_port_fs.h"
 #include "user_home_page.h"
-#include "shell_page.h"
-#include "video_page.h"
-#include "usb_disk_page.h"
-#include "recorder_page.h"
-#include "recorder_play_page.h"
-#include "wifi_page.h"
 #include "videoplay.h"
 #include "page_manager.h"
+#include "page_init.h"
 #include "wifi_manager.h"
 #include "onenet_mqtt.h"
 #include "onenet_dm.h"
 #include "mipi_cam.h"
-#include "i2s_audio.h"
-#include "es8311.h"
-#include "sdmmc.h"
-#include "flash_fat.h"
-#include "usb_hid_mouse.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -104,48 +92,16 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    shell_page_init();          /* 串口命令行(UART0): help/hello/free/clear/reboot, 输出镜像到LCD */
-    user_home_page_init();      /* 注册主界面页面(相机入口 + 命令行入口) */
-    video_page_init();          /* 注册视频页: 列出 /User/VIDEO 下的 AVI 并播放 */
-    usb_disk_page_init();       /* 注册U盘模式页: SD卡作为U盘交给PC读写 */
-    recorder_page_init();       /* 注册录音页: 触摸录音并保存到 /User/RECORDER 目录 */
-    recorder_play_page_init();  /* 注册录音回放页: 列出 /User/RECORDER 下的 WAV 并播放 */
-    wifi_page_init();           /* 注册WiFi连接页: 下拉选择热点 + 密码键盘 */
+    /* 注册所有页面: shell命令行、主界面、视频、U盘、录音/回放、WiFi;
+     * wifi 页会执行 esp_netif_init, 所以必须先于硬件初始化 */
+    pages_init_all();
 
-    sdmmc_init();               /* 挂载SD卡: LVGL文件系统盘符 D: -> /User */
-    flash_fat_init();           /* 挂载Flash FAT分区: LVGL文件系统盘符 C: -> /Factory */
-
-    led_init();                 /* LED初始化 */
-    lcd_init();                 /* LCD屏初始化 */
-    tp_dev.init();              /* 初始化触摸屏(同时初始化I2C总线) */
-
-    /* USB-A口鼠标: 安装USB Host后由LVGL注册为第二个指针设备 */
-    if (usb_hid_mouse_init() != ESP_OK)
-    {
-        ESP_LOGW(TAG, "usb mouse init failed");
-    }
+    /* 板级硬件按依赖顺序初始化: SD/FAT 挂载、LED、LCD、触摸、USB鼠标、摄像头、音频;
+     * 单项失败只警告, 不阻塞其它功能 */
+    hardware_init_all();
 
     /* 摄像头只做初始化, 点击界面上的相机按钮后再开始全屏预览 */
-    if (mipi_cam_init() != ESP_OK)
-    {
-        ESP_LOGW(TAG, "mipi camera init failed");
-    }
     user_home_page_set_camera_cb(camera_btn_handler);
-
-    /* 音频: I2S 直连 ES8311, 控制口复用摄像头 SCCB 的 I2C 总线;
-     * 初始化失败只影响视频声音, 不阻塞其它功能 */
-    if (i2s_audio_init() != ESP_OK)
-    {
-        ESP_LOGW(TAG, "i2s init failed");
-    }
-    else if (es8311_init(mipi_cam_sccb_bus()) != ESP_OK)
-    {
-        ESP_LOGW(TAG, "es8311 init failed");
-    }
-    else
-    {
-        ESP_LOGI(TAG, "audio codec ready");
-    }
 
     /* WiFi协议栈由WiFi页面模块初始化; 连接哪个热点也在WiFi页面里选择 */
     onenet_dm_init();
