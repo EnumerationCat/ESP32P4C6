@@ -45,7 +45,7 @@ static void notice_on_stop(view_t *self);
 static void notice_slide_in(popup_notice_ui_t *ui);
 static bool notice_hide_instance(popup_notice_ui_t *ui);
 static bool notice_request_close(view_t *self);
-static void notice_dispose(view_t *self);
+static void notice_delete(view_t *self);
 static void notice_out_ready_cb(lv_anim_t *a);
 
 /**********************
@@ -67,7 +67,7 @@ static const popup_notice_ui_t s_notice_template =
         .priority      = SYSTEM_PRIORITY0,
         .value         = 0,
         .request_close = notice_request_close,
-        .request_delete       = notice_dispose,
+        .request_delete       = notice_delete,
     },
 };
 
@@ -203,8 +203,8 @@ static void notice_on_stop(view_t *self)
     ui->hiding  = false;
 }
 
-/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_dispose 统一释放 */
-static void notice_dispose(view_t *self)
+/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_delete 统一释放 */
+static void notice_delete(view_t *self)
 {
     popup_notice_ui_t *ui = notice_ui(self);
     popup_notice_ui_t **pp = &s_instances;

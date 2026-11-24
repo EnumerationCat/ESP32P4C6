@@ -58,7 +58,7 @@ static void confirm_on_start(view_t *self);
 static void confirm_on_stop(view_t *self);
 static void confirm_slide_in(popup_confirm_ui_t *ui);
 static bool confirm_hide_instance(popup_confirm_ui_t *ui);
-static void confirm_dispose(view_t *self);
+static void confirm_delete(view_t *self);
 static void confirm_out_ready_cb(lv_anim_t *a);
 static void confirm_btn_event_cb(lv_event_t *e);
 
@@ -80,7 +80,7 @@ static const popup_confirm_ui_t s_confirm_template =
         .level    = POPUP_LEVEL_APP,
         .priority = APP_PRIORITY0,
         .value    = 0,                              /* 常驻, 由用户点击按钮关闭 */
-        .request_delete  = confirm_dispose,
+        .request_delete  = confirm_delete,
     },
 };
 
@@ -278,8 +278,8 @@ static void confirm_on_stop(view_t *self)
     ui->hiding      = false;
 }
 
-/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_dispose 统一释放 */
-static void confirm_dispose(view_t *self)
+/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_delete 统一释放 */
+static void confirm_delete(view_t *self)
 {
     popup_confirm_ui_t *ui = confirm_ui(self);
     popup_confirm_ui_t **pp = &s_instances;

@@ -43,7 +43,7 @@ static void toast_on_stop(view_t *self);
 static void toast_fade_in(popup_toast_ui_t *ui);
 static bool toast_hide_instance(popup_toast_ui_t *ui);
 static bool toast_request_close(view_t *self);
-static void toast_dispose(view_t *self);
+static void toast_delete(view_t *self);
 static void toast_out_ready_cb(lv_anim_t *a);
 
 /**********************
@@ -65,7 +65,7 @@ static const popup_toast_ui_t s_toast_template =
         .priority      = SYSTEM_PRIORITY1,
         .value         = 0,
         .request_close = toast_request_close,
-        .request_delete       = toast_dispose,
+        .request_delete       = toast_delete,
     },
 };
 
@@ -212,8 +212,8 @@ static void toast_on_stop(view_t *self)
     ui->hiding  = false;
 }
 
-/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_dispose 统一释放 */
-static void toast_dispose(view_t *self)
+/* 出队后由管理器清理: 只从本类型实例链表摘除, 内存由 popup_delete 统一释放 */
+static void toast_delete(view_t *self)
 {
     popup_toast_ui_t *ui = toast_ui(self);
     popup_toast_ui_t **pp = &s_instances;
