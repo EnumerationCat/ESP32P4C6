@@ -24,7 +24,9 @@
 
 #include <string.h>
 
-/* 统一生命周期方法(经 g_popup_manager.create/destroy 暴露) */
+/**
+ * @brief       统一生命周期方法(经 g_popup_manager.create/destroy 暴露)
+ */
 static popup_base_t *popup_create(const popup_base_t *prototype, uint32_t size,
                                   popup_priority_t level, uint32_t priority);
 static void popup_destroy(view_t *view);
@@ -36,22 +38,33 @@ popup_manager_t g_popup_manager =
     .destroy = popup_destroy,
 };
 
-/* 节点 -> 弹窗 */
+/**
+ * @brief       链表节点转换为所属弹窗视图
+ * @param       node: 侵入式链表节点(view_t.link)
+ * @retval      节点所属的弹窗视图
+ */
 static inline view_t *popup_view_of(list_head_t *node)
 {
     return container_of(node, view_t, link);
 }
 
-/* 取某一层对应的链表 */
+/**
+ * @brief       取指定层级对应的 ready 链表
+ * @param       pm:    弹窗管理器实例
+ * @param       level: 弹窗层级(POPUP_LEVEL_APP / POPUP_LEVEL_SYS)
+ * @retval      该层级的 ready 链表
+ */
 static list_t *popup_level_list(popup_manager_t *pm, popup_priority_t level)
 {
     return (level == POPUP_LEVEL_SYS) ? &pm->sys : &pm->app;
 }
 
-/* 从一条 ready 链表里挑出"接下来该运行"的弹窗:
- *   - 优先级(value)最高的那个;
- *   - 若最高优先级有多个, 取最早入队的那个(FIFO)。
- * 返回该节点对应的弹窗; 链表为空时返回 NULL。 */
+/**
+ * @brief       从一条 ready 链表中选出下一个该运行的弹窗
+ * @note        优先级(link.value)最高者优先; 优先级相同则取最早入队者(FIFO)
+ * @param       list: 待扫描的 ready 链表
+ * @retval      选中的弹窗视图; 链表为空返回 NULL
+ */
 static view_t *popup_list_pick(list_t *list)
 {
     list_head_t *node;
@@ -70,7 +83,12 @@ static view_t *popup_list_pick(list_t *list)
     return (selected != NULL) ? popup_view_of(selected) : NULL;
 }
 
-/* 全局下一个该运行的弹窗: sys 整层优先于 app */
+/**
+ * @brief       选出全局下一个该运行的弹窗
+ * @note        sys 整层优先于 app
+ * @param       pm: 弹窗管理器实例
+ * @retval      选中的弹窗视图; 两层都为空返回 NULL
+ */
 static view_t *popup_pick_ready(popup_manager_t *pm)
 {
     view_t *view = popup_list_pick(&pm->sys);
@@ -78,7 +96,13 @@ static view_t *popup_pick_ready(popup_manager_t *pm)
     return (view != NULL) ? view : popup_list_pick(&pm->app);
 }
 
-/* a 是否严格高于 b(先比层级, 再比 priority) */
+/**
+ * @brief       判断弹窗 a 是否严格高于弹窗 b
+ * @note        先比较层级(sys > app), 层级相同再比较 priority
+ * @param       a: 待比较弹窗
+ * @param       b: 基准弹窗
+ * @retval      a 严格高于 b 返回 true, 否则 false
+ */
 static bool popup_strictly_higher(view_t *a, view_t *b)
 {
     popup_base_t *pa = popup_base_of(a);
@@ -92,7 +116,12 @@ static bool popup_strictly_higher(view_t *a, view_t *b)
     return pa->priority > pb->priority;
 }
 
-/* 开始运行某个弹窗 */
+/**
+ * @brief       让指定弹窗开始运行(记录运行时间戳并调用 on_start)
+ * @param       pm:   弹窗管理器实例
+ * @param       view: 待启动的弹窗视图
+ * @retval      无
+ */
 static void popup_start_running(popup_manager_t *pm, view_t *view)
 {
     pm->running  = view;
@@ -105,13 +134,18 @@ static void popup_start_running(popup_manager_t *pm, view_t *view)
     }
 }
 
-/* 出队后释放动态实例(静态实例 dispose 为 NULL) */
+/**
+ * @brief       出队后释放弹窗实例
+ * @note        dispose==NULL 视为静态实例, 只出队不释放; 动态实例先调用类型
+ *              清理钩子(从本类型实例链表摘除), 再由管理器统一 lv_mem_free
+ * @param       view: 待释放的弹窗视图
+ * @retval      无
+ */
 static void popup_dispose(view_t *view)
 {
     popup_base_t *base = popup_base_of(view);
 
-    /* dispose==NULL 视为静态实例: 只出队不释放。
-     * 动态实例: 先调类型清理钩子(从本类型实例链表摘除), 再由管理器统一释放内存。 */
+    /* 静态实例 dispose==NULL, 只出队不释放; 动态实例走类型清理后统一释放 */
     if (base->dispose != NULL)
     {
         base->dispose(view);
@@ -119,7 +153,12 @@ static void popup_dispose(view_t *view)
     }
 }
 
-/* 抢占: 被抢占的弹窗直接关闭(出队销毁, 高优先级退出后不再恢复) */
+/**
+ * @brief       抢占并关闭当前运行中的弹窗
+ * @note        被抢占的弹窗直接出队销毁, 高优先级退出后不再恢复
+ * @param       pm: 弹窗管理器实例
+ * @retval      无
+ */
 static void popup_preempt_running(popup_manager_t *pm)
 {
     view_t *preempted = pm->running;
@@ -141,7 +180,11 @@ static void popup_preempt_running(popup_manager_t *pm)
     popup_dispose(preempted);
 }
 
-/* 调度: 选出该运行的弹窗, 必要时抢占当前运行者 */
+/**
+ * @brief       调度: 选出该运行的弹窗, 必要时抢占当前运行者
+ * @param       pm: 弹窗管理器实例
+ * @retval      无
+ */
 static void popup_schedule(popup_manager_t *pm)
 {
     view_t *next = popup_pick_ready(pm);
@@ -168,6 +211,11 @@ static void popup_schedule(popup_manager_t *pm)
     }
 }
 
+/**
+ * @brief       懒初始化: 首次调用时初始化两条 ready 链表
+ * @param       pm: 弹窗管理器实例
+ * @retval      无
+ */
 static void popup_manager_ensure_init(popup_manager_t *pm)
 {
     if (pm->inited)
@@ -183,12 +231,23 @@ static void popup_manager_ensure_init(popup_manager_t *pm)
     pm->inited   = true;
 }
 
+/**
+ * @brief       初始化弹窗管理器(可重复调用)
+ * @param       无
+ * @retval      无
+ */
 void popup_manager_init(void)
 {
     popup_manager_ensure_init(&g_popup_manager);
 }
 
-/* 上架: 按优先级插入对应层的 ready 链表并尝试调度 */
+/**
+ * @brief       上架弹窗: 记录层级/优先级, 插入对应 ready 链表并尝试调度
+ * @param       view:     待上架的弹窗视图
+ * @param       level:    弹窗层级
+ * @param       priority: 层内优先级(数值越大越优先)
+ * @retval      无
+ */
 static void popup_open(view_t *view, popup_priority_t level, uint32_t priority)
 {
     popup_manager_t *pm = &g_popup_manager;
@@ -211,9 +270,16 @@ static void popup_open(view_t *view, popup_priority_t level, uint32_t priority)
     popup_schedule(pm);                   /* 入队后尝试调度(可能抢占当前运行弹窗) */
 }
 
-/* create: 按原型分配新实例并上架(入队调度), 返回基类指针
- * 原型可以是栈上局部变量: 先填好派生数据, 再交给管理器拷贝并上架,
- * 这样 on_start 才能读到正确的内容。 */
+/**
+ * @brief       按原型分配新实例并上架(入队调度)
+ * @note        原型可以是栈上局部变量: 先填好派生数据, 再交给管理器拷贝并上架,
+ *              这样 on_start 才能读到正确的内容; 返回值首成员为 popup_base_t
+ * @param       prototype: 实例模板(整块派生结构的原型)
+ * @param       size:      实例总大小(字节, 至少为 sizeof(popup_base_t))
+ * @param       level:     弹窗层级
+ * @param       priority:  层内优先级(数值越大越优先)
+ * @retval      新的弹窗基类指针; 参数非法或分配失败返回 NULL
+ */
 static popup_base_t *popup_create(const popup_base_t *prototype, uint32_t size,
                                   popup_priority_t level, uint32_t priority)
 {
@@ -238,7 +304,15 @@ static popup_base_t *popup_create(const popup_base_t *prototype, uint32_t size,
     return popup;
 }
 
-/* create 的系统级便捷封装 */
+/**
+ * @brief       按原型创建并上架一个系统级弹窗(create 的便捷封装)
+ * @note        等价于 g_popup_manager.create(prototype, size, POPUP_LEVEL_SYS, priority);
+ *              跨页面保留, 控件应绘制在 lv_layer_sys()
+ * @param       prototype: 实例模板(整块派生结构的原型)
+ * @param       size:      实例总大小(字节, 至少为 sizeof(popup_base_t))
+ * @param       priority:  系统级队列内优先级(数值越大越靠上)
+ * @retval      新的弹窗基类指针; 分配失败返回 NULL
+ */
 popup_base_t *system_popup_create(const popup_base_t *prototype, uint32_t size,
                                   systempopup_priority_t priority)
 {
@@ -246,7 +320,15 @@ popup_base_t *system_popup_create(const popup_base_t *prototype, uint32_t size,
                                   (uint32_t)priority);
 }
 
-/* create 的应用级便捷封装 */
+/**
+ * @brief       按原型创建并上架一个应用级弹窗(create 的便捷封装)
+ * @note        等价于 g_popup_manager.create(prototype, size, POPUP_LEVEL_APP, priority);
+ *              随页面切换关闭, 控件应绘制在 lv_layer_top()
+ * @param       prototype: 实例模板(整块派生结构的原型)
+ * @param       size:      实例总大小(字节, 至少为 sizeof(popup_base_t))
+ * @param       priority:  应用级队列内优先级(数值越大越靠上)
+ * @retval      新的弹窗基类指针; 分配失败返回 NULL
+ */
 popup_base_t *app_popup_create(const popup_base_t *prototype, uint32_t size,
                                apppopup_priority_t priority)
 {
@@ -254,7 +336,11 @@ popup_base_t *app_popup_create(const popup_base_t *prototype, uint32_t size,
                                   (uint32_t)priority);
 }
 
-/* destroy: 停止(运行中先 on_stop 销毁控件) + 出队 + 释放动态实例内存 */
+/**
+ * @brief       销毁弹窗: 停止(运行中先调 on_stop) + 出队 + 释放动态实例内存
+ * @param       view: 待销毁的弹窗视图
+ * @retval      无
+ */
 static void popup_destroy(view_t *view)
 {
     popup_manager_t *pm = &g_popup_manager;
@@ -292,6 +378,11 @@ static void popup_destroy(view_t *view)
     popup_dispose(view);
 }
 
+/**
+ * @brief       关闭某一层的所有弹窗(从优先级最高的开始)
+ * @param       level: 弹窗层级
+ * @retval      无
+ */
 void popup_manager_close_all(popup_priority_t level)
 {
     popup_manager_t *pm = &g_popup_manager;
@@ -324,6 +415,11 @@ void popup_manager_close_all(popup_priority_t level)
     popup_schedule(pm);
 }
 
+/**
+ * @brief       取某一层当前优先级最高的弹窗
+ * @param       level: 弹窗层级
+ * @retval      弹窗视图; 无弹窗返回 NULL
+ */
 view_t *popup_manager_top(popup_priority_t level)
 {
     popup_manager_ensure_init(&g_popup_manager);
@@ -331,6 +427,12 @@ view_t *popup_manager_top(popup_priority_t level)
     return popup_list_pick(popup_level_list(&g_popup_manager, level));
 }
 
+/**
+ * @brief       关闭最上层的一个弹窗(page_back 用)
+ * @note        先关系统级, 系统级没有时再关应用级
+ * @param       无
+ * @retval      被关闭的弹窗视图; 没有弹窗返回 NULL
+ */
 view_t *popup_manager_back(void)
 {
     view_t *top = popup_manager_top(POPUP_LEVEL_SYS);
@@ -348,6 +450,11 @@ view_t *popup_manager_back(void)
     return top;
 }
 
+/**
+ * @brief       判断弹窗是否正在显示(在任一 ready 链表中)
+ * @param       view: 弹窗视图
+ * @retval      是返回 true, 否返回 false
+ */
 bool popup_manager_is_open(view_t *view)
 {
     list_t *owner;
@@ -362,6 +469,12 @@ bool popup_manager_is_open(view_t *view)
     return (owner == &g_popup_manager.app || owner == &g_popup_manager.sys);
 }
 
+/**
+ * @brief       周期调度: 检查存活时间到期 + 依次调用所有弹窗的 on_update
+ * @note        排队中的弹窗也会刷新 on_update
+ * @param       无
+ * @retval      无
+ */
 void popup_manager_tick(void)
 {
     popup_manager_t *pm = &g_popup_manager;
