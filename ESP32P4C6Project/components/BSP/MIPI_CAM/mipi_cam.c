@@ -1,6 +1,7 @@
 #include "mipi_cam.h"
 #include "mipi_lcd.h"
 #include "touch.h"
+#include "esp_cache.h"
 
 static const char *mipi_cam_tag = "mipi_cam";
 
@@ -13,6 +14,7 @@ typedef struct
     SemaphoreHandle_t preview_req_sem;  /* 预览请求信号量 */
     volatile bool preview_active;       /* 预览进行中 */
     volatile bool preview_exit;         /* 请求退出预览 */
+    volatile bool frame_open;           /* 捕获模式(供LVGL取帧)已开流 */
     bool cam_inited;                    /* 摄像头是否已初始化 */
     bool buffers_queued;                /* 帧缓冲是否已在驱动队列中 */
 
@@ -32,6 +34,7 @@ static void lcd_cam_task(void *arg);
 static esp_err_t camera_queue_all_buffers(void);
 static bool touch_pressed(void);
 static void camera_display_frame(int index, void *draw_buffer);
+static esp_err_t camera_ppa_scale(int index, void *dst);
 
 static i2c_master_bus_handle_t s_sccb_bus = NULL;   /* 摄像头SCCB总线(ES8311共用) */
 
@@ -161,7 +164,7 @@ esp_err_t mipi_cam_init(void)
  */
 esp_err_t mipi_cam_preview_start(void)
 {
-    if (!s_cam.cam_inited || s_cam.preview_req_sem == NULL)
+    if (!s_cam.cam_inited || s_cam.preview_req_sem == NULL || s_cam.frame_open)
     {
         return ESP_ERR_INVALID_STATE;
     }
@@ -328,12 +331,12 @@ static void lcd_cam_task(void *arg)
 }
 
 /**
- * @brief       使用PPA把摄像头画面裁剪/缩放到LCD帧缓冲
+ * @brief       使用PPA把摄像头画面裁剪/缩放到指定缓冲(面板分辨率, RGB565)
  * @param       index: 摄像头帧缓冲索引
- * @param       draw_buffer: 目标LCD帧缓冲
- * @retval      无
+ * @param       dst:   目标缓冲(大小至少为面板宽*高*2)
+ * @retval      ESP_OK:成功; 其它:失败或当前面板型号未适配
  */
-static void camera_display_frame(int index, void *draw_buffer)
+static esp_err_t camera_ppa_scale(int index, void *dst)
 {
     esp_err_t ppa_ret = ESP_ERR_NOT_SUPPORTED;
 
@@ -349,7 +352,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 160,                        /* 输入块的Y方向偏移(800x800居中裁剪) */
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,  /* 输入图片的色彩模式 */
 
-            .out.buffer         = draw_buffer,                /* 输出块的数据源 */
+            .out.buffer         = dst,                /* 输出块的数据源 */
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),   /* 数据源大小 */
             .out.pic_w          = lcddev.width,               /* 输出块的宽度(由输入的宽度、缩放因子和旋转角度决定) */
             .out.pic_h          = lcddev.height,              /* 输出块的高度(由输入的宽度、缩放因子和旋转角度决定) */
@@ -376,7 +379,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 60,
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
 
-            .out.buffer         = draw_buffer,
+            .out.buffer         = dst,
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),
             .out.pic_w          = lcddev.width,
             .out.pic_h          = lcddev.height,
@@ -403,7 +406,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 12,
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
 
-            .out.buffer         = draw_buffer,
+            .out.buffer         = dst,
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),
             .out.pic_w          = lcddev.width,
             .out.pic_h          = lcddev.height,
@@ -430,7 +433,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 12,
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
 
-            .out.buffer         = draw_buffer,
+            .out.buffer         = dst,
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),
             .out.pic_w          = lcddev.width,
             .out.pic_h          = lcddev.height,
@@ -457,7 +460,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 60,
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
 
-            .out.buffer         = draw_buffer,
+            .out.buffer         = dst,
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),
             .out.pic_w          = lcddev.width,
             .out.pic_h          = lcddev.height,
@@ -484,7 +487,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 0,
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
 
-            .out.buffer         = draw_buffer,
+            .out.buffer         = dst,
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),
             .out.pic_w          = lcddev.width,
             .out.pic_h          = lcddev.height,
@@ -511,7 +514,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 44,
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
 
-            .out.buffer         = draw_buffer,
+            .out.buffer         = dst,
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),
             .out.pic_w          = lcddev.width,
             .out.pic_h          = lcddev.height,
@@ -538,7 +541,7 @@ static void camera_display_frame(int index, void *draw_buffer)
             .in.block_offset_y  = 44,
             .in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565,
 
-            .out.buffer         = draw_buffer,
+            .out.buffer         = dst,
             .out.buffer_size    = ALIGN_UP_BY(lcddev.height * lcddev.width * 16 / 8, s_cam.data_cache_line_size),
             .out.pic_w          = lcddev.width,
             .out.pic_h          = lcddev.height,
@@ -554,10 +557,173 @@ static void camera_display_frame(int index, void *draw_buffer)
         ppa_ret = ppa_do_scale_rotate_mirror(s_cam.ppa_srm_handle, &oper_config);
     }
 
-    if (ppa_ret == ESP_OK)
+    return ppa_ret;
+}
+
+/**
+ * @brief       使用PPA把摄像头画面缩放到LCD帧缓冲并提交刷新
+ * @param       index:     摄像头帧缓冲索引
+ * @param       lcd_dst:   目标LCD帧缓冲
+ * @retval      无
+ */
+static void camera_display_frame(int index, void *lcd_dst)
+{
+    if (camera_ppa_scale(index, lcd_dst) == ESP_OK)
     {
         /* 提交帧缓冲: 刷新cache并让DPI切换到该缓冲(LCD驱动检测到指针在帧缓冲内时只做cache回写) */
         esp_lcd_panel_draw_bitmap(lcddev.lcd_panel_handle, 0, 0,
-                                  lcddev.width, lcddev.height, draw_buffer);
+                                  lcddev.width, lcddev.height, lcd_dst);
     }
+}
+
+/*------------------- 捕获模式: 供 LVGL 页面取帧显示 -------------------*/
+
+/**
+ * @brief       输出图像尺寸(即面板分辨率)
+ * @param       w: 输出宽度(可为NULL)
+ * @param       h: 输出高度(可为NULL)
+ * @retval      true:摄像头已初始化; false:未初始化
+ */
+bool mipi_cam_frame_size(uint16_t *w, uint16_t *h)
+{
+    if (!s_cam.cam_inited)
+    {
+        return false;
+    }
+
+    if (w != NULL)
+    {
+        *w = lcddev.width;
+    }
+
+    if (h != NULL)
+    {
+        *h = lcddev.height;
+    }
+
+    return true;
+}
+
+/**
+ * @brief       单帧缓冲建议大小(已按cache行对齐)
+ * @param       无
+ * @retval      字节数; 摄像头未初始化返回0
+ */
+size_t mipi_cam_frame_buf_size(void)
+{
+    if (s_cam.data_cache_line_size == 0)
+    {
+        return 0;
+    }
+
+    return ALIGN_UP_BY(lcddev.width * lcddev.height * 16 / 8, s_cam.data_cache_line_size);
+}
+
+/**
+ * @brief       单帧缓冲需要的对齐字节数(即cache行大小)
+ * @param       无
+ * @retval      对齐字节数
+ */
+size_t mipi_cam_frame_buf_align(void)
+{
+    return s_cam.data_cache_line_size;
+}
+
+/**
+ * @brief       开流, 进入捕获模式(与 preview_start 互斥)
+ * @param       无
+ * @retval      ESP_OK:成功; ESP_ERR_INVALID_STATE:未初始化/预览进行中; ESP_FAIL:开流失败
+ */
+esp_err_t mipi_cam_frame_begin(void)
+{
+    if (!s_cam.cam_inited || s_cam.preview_active)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (s_cam.frame_open)
+    {
+        return ESP_OK;
+    }
+
+    if (!s_cam.buffers_queued)
+    {
+        if (camera_queue_all_buffers() != ESP_OK)
+        {
+            return ESP_FAIL;
+        }
+        s_cam.buffers_queued = true;
+    }
+
+    if (camera_stream_start(s_cam.video_fd) != ESP_OK)
+    {
+        ESP_LOGE(mipi_cam_tag, "failed to start camera stream");
+        return ESP_FAIL;
+    }
+
+    s_cam.frame_open = true;
+    return ESP_OK;
+}
+
+/**
+ * @brief       取一帧写入调用者缓冲(面板分辨率 RGB565)
+ * @note        DQBUF 是阻塞的; 不持有帧时会等待摄像头下一帧.
+ *              缓冲需按 mipi_cam_frame_buf_align() 对齐, 大小 >= mipi_cam_frame_buf_size()
+ * @param       dst:      目标缓冲(可直接作为 lv_img 的 LV_IMG_CF_TRUE_COLOR 数据源)
+ * @param       dst_size: 目标缓冲大小
+ * @retval      ESP_OK:成功; ESP_ERR_INVALID_STATE:未进入捕获模式; 其它:失败
+ */
+esp_err_t mipi_cam_frame_read(void *dst, size_t dst_size)
+{
+    struct v4l2_buffer buf;
+    size_t buf_size = mipi_cam_frame_buf_size();
+    esp_err_t ret;
+
+    if (!s_cam.frame_open || dst == NULL || buf_size == 0 || dst_size < buf_size)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    memset(&buf, 0, sizeof(buf));
+    buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+
+    if (ioctl(s_cam.video_fd, VIDIOC_DQBUF, &buf) != 0)
+    {
+        ESP_LOGE(mipi_cam_tag, "failed to receive video frame");
+        return ESP_FAIL;
+    }
+
+    /* PPA 通过 DMA 写 dst: 先清掉可能残留的脏 cache 行, 写完再让 CPU 侧 cache 失效 */
+    esp_cache_msync(dst, buf_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    ret = camera_ppa_scale(buf.index, dst);
+    if (ret == ESP_OK)
+    {
+        esp_cache_msync(dst, buf_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    }
+
+    if (ioctl(s_cam.video_fd, VIDIOC_QBUF, &buf) != 0)
+    {
+        ESP_LOGE(mipi_cam_tag, "failed to free video frame");
+    }
+
+    return ret;
+}
+
+/**
+ * @brief       关流, 退出捕获模式
+ * @note        与 begin/read 在同一任务里调用; 之后可重新 begin
+ * @param       无
+ * @retval      无
+ */
+void mipi_cam_frame_end(void)
+{
+    if (!s_cam.frame_open)
+    {
+        return;
+    }
+
+    camera_stream_stop(s_cam.video_fd);     /* STREAMOFF: 驱动会把队列里的buffer全部出队 */
+    s_cam.buffers_queued = false;
+    s_cam.frame_open = false;
 }

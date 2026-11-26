@@ -8,6 +8,7 @@
 #include "usb_disk_page.h"
 #include "recorder_page.h"
 #include "recorder_play_page.h"
+#include "camera_page.h"
 #include "wifi_page.h"
 
 /* 顺序沿用原 app_main: shell 最先(其它页面的串口/LCD 输出依赖它),
@@ -20,6 +21,7 @@ static void (*const k_page_inits[])(void) =
     usb_disk_page_init,
     recorder_page_init,
     recorder_play_page_init,
+    camera_page_init,
     wifi_page_init,
 };
 

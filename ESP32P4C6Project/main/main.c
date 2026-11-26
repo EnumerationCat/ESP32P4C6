@@ -11,6 +11,7 @@
 #include "videoplay.h"
 #include "page_manager.h"
 #include "page_init.h"
+#include "camera_page.h"
 #include "wifi_manager.h"
 #include "onenet_mqtt.h"
 #include "onenet_dm.h"
@@ -23,12 +24,13 @@ static const char *TAG = "MAIN";
 
 /**
  * @brief       相机按钮回调(用户界面无返回值)
+ * @note        进入相机页: 画面由 camera_page 通过 lv_img 显示, 可叠加返回按钮
  * @param       无
  * @retval      无
  */
 static void camera_btn_handler(void)
 {
-    mipi_cam_preview_start();
+    manager_gopage(CAMERA_PAGE_ID);
 }
 
 /**
