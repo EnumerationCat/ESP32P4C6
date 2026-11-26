@@ -20,6 +20,8 @@
 #include "container_of.h"
 #include "lvgl.h"
 
+#include <string.h>
+
 /**********************
  *      TYPEDEFS
  **********************/
@@ -39,6 +41,7 @@ static void home_deinit(view_t *self);
 static void home_on_start(view_t *self);
 static void home_on_resume(view_t *self);
 static void home_on_stop(view_t *self);
+static void home_on_event(view_t *self, const char *event_id);
 
 /**********************
  *   STATIC VARIABLES
@@ -54,6 +57,7 @@ static user_home_page_ui_t s_ui =
         .on_start  = home_on_start,
         .on_resume = home_on_resume,
         .on_stop   = home_on_stop,
+        .on_event  = home_on_event,
     },
 };
 
@@ -69,64 +73,25 @@ static inline user_home_page_ui_t *home_ui(view_t *self)
     return container_of(self, user_home_page_ui_t, base);
 }
 
-/* 相机按钮事件回调 */
-static void camera_btn_event_cb(lv_event_t *e)
+/* 按钮统一事件适配: 点击时把 (视图, 事件ID) 转给 on_event 分发
+ *  - 事件ID 存在按钮对象的 user_data
+ *  - 视图指针 存在事件回调的 user_data(所有按钮相同) */
+static void home_btn_event_cb(lv_event_t *e)
 {
-    (void)e;
+    view_t *self = (view_t *)lv_event_get_user_data(e);
+    const char *event_id = (const char *)lv_obj_get_user_data(lv_event_get_target(e));
 
-    if (s_camera_cb != NULL)
+    if (self != NULL && event_id != NULL && self->on_event != NULL)
     {
-        s_camera_cb();          /* 进入摄像头全屏预览, 触摸屏幕任意位置退出 */
+        self->on_event(self, event_id);
     }
 }
 
-/* 命令行按钮事件回调 */
-static void shell_btn_event_cb(lv_event_t *e)
+/* 给按钮绑定事件ID, 点击统一走 home_btn_event_cb */
+static void home_btn_bind(lv_obj_t *btn, const char *event_id)
 {
-    (void)e;
-
-    /* 按ID切页: 在挂起栈中则恢复(on_resume), 否则重新启动(on_start) */
-    manager_gopage(SHELL_PAGE_ID);
-}
-
-/* 视频页按钮事件回调 */
-static void video_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    manager_gopage(VIDEO_PAGE_ID);
-}
-
-/* U盘模式页按钮事件回调 */
-static void usb_disk_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    manager_gopage(USB_DISK_PAGE_ID);
-}
-
-/* 录音页按钮事件回调 */
-static void recorder_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    manager_gopage(RECORDER_PAGE_ID);
-}
-
-/* WiFi连接页按钮事件回调 */
-static void wifi_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    manager_gopage(WIFI_PAGE_ID);
-}
-
-/* 顶部提示弹窗测试: 2秒后自动收回 */
-static void msg_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    popup_notice_show("System0 notice!", 2000);
+    lv_obj_set_user_data(btn, (void *)event_id);
+    lv_obj_add_event_cb(btn, home_btn_event_cb, LV_EVENT_CLICKED, &s_ui.base);
 }
 
 /* 双按钮弹窗的按钮回调(在弹窗关闭前调用) */
@@ -138,31 +103,6 @@ static void popup_cancel_cb(void *user_data)
 static void popup_ok_cb(void *user_data)
 {
     (void)user_data;
-}
-
-/* 底部双按钮弹窗测试 */
-static void dialog_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    popup_confirm_show("Are you sure you want to continue?",
-                       "Cancel", "OK", popup_cancel_cb, popup_ok_cb, NULL);
-}
-
-/* 中心toast弹窗测试: 2秒后自动收回 */
-static void toast_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    popup_toast_show("System1 toast", 2000);
-}
-
-/* 系统级提示弹窗测试: 用来验证应用级弹窗盖不住系统级弹窗 */
-static void msg2_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-
-    popup_notice_show("System0 notice", 2000);
 }
 
 /* 创建主界面控件(幂等) */
@@ -195,7 +135,7 @@ static void home_init(view_t *self)
     lv_label_set_text(camera_label, "CAM");
     lv_obj_center(camera_label);
 
-    lv_obj_add_event_cb(camera_btn, camera_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(camera_btn, "cam");
 
     /* ==================== 命令行页面按钮 ==================== */
     lv_obj_t *shell_btn = lv_btn_create(object);
@@ -206,7 +146,7 @@ static void home_init(view_t *self)
     lv_label_set_text(shell_label, "shell");
     lv_obj_center(shell_label);
 
-    lv_obj_add_event_cb(shell_btn, shell_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(shell_btn, "shell");
 
     /* ==================== 视频页面按钮 ==================== */
     lv_obj_t *video_btn = lv_btn_create(object);
@@ -217,7 +157,7 @@ static void home_init(view_t *self)
     lv_label_set_text(video_label, "VIDEO");
     lv_obj_center(video_label);
 
-    lv_obj_add_event_cb(video_btn, video_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(video_btn, "video");
 
     /* ==================== U盘模式按钮 ==================== */
     lv_obj_t *usb_btn = lv_btn_create(object);
@@ -228,7 +168,7 @@ static void home_init(view_t *self)
     lv_label_set_text(usb_label, "USB");
     lv_obj_center(usb_label);
 
-    lv_obj_add_event_cb(usb_btn, usb_disk_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(usb_btn, "usb");
 
     /* ==================== 录音页按钮 ==================== */
     lv_obj_t *recorder_btn = lv_btn_create(object);
@@ -239,7 +179,7 @@ static void home_init(view_t *self)
     lv_label_set_text(recorder_label, "REC");
     lv_obj_center(recorder_label);
 
-    lv_obj_add_event_cb(recorder_btn, recorder_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(recorder_btn, "rec");
 
     /* ==================== WiFi连接页按钮 ==================== */
     lv_obj_t *wifi_btn = lv_btn_create(object);
@@ -250,7 +190,7 @@ static void home_init(view_t *self)
     lv_label_set_text(wifi_label, "WIFI");
     lv_obj_center(wifi_label);
 
-    lv_obj_add_event_cb(wifi_btn, wifi_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(wifi_btn, "wifi");
 
     /* ==================== 三种弹窗测试按钮(第一行, 放在页面最上面) ==================== */
     lv_obj_t *msg_btn = lv_btn_create(object);
@@ -261,7 +201,7 @@ static void home_init(view_t *self)
     lv_label_set_text(msg_label, "MSG");
     lv_obj_center(msg_label);
 
-    lv_obj_add_event_cb(msg_btn, msg_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(msg_btn, "notice");
 
     lv_obj_t *dialog_btn = lv_btn_create(object);
     lv_obj_set_size(dialog_btn, 60, 60);
@@ -271,7 +211,7 @@ static void home_init(view_t *self)
     lv_label_set_text(dialog_label, "DIALOG");
     lv_obj_center(dialog_label);
 
-    lv_obj_add_event_cb(dialog_btn, dialog_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(dialog_btn, "dialog");
 
     lv_obj_t *toast_btn = lv_btn_create(object);
     lv_obj_set_size(toast_btn, 60, 60);
@@ -281,7 +221,7 @@ static void home_init(view_t *self)
     lv_label_set_text(toast_label, "TOAST");
     lv_obj_center(toast_label);
 
-    lv_obj_add_event_cb(toast_btn, toast_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(toast_btn, "toast");
 
     /* ==================== 系统级弹窗测试按钮(第二行居中) ==================== */
     lv_obj_t *msg2_btn = lv_btn_create(object);
@@ -292,7 +232,7 @@ static void home_init(view_t *self)
     lv_label_set_text(msg2_label, "MSG2");
     lv_obj_center(msg2_label);
 
-    lv_obj_add_event_cb(msg2_btn, msg2_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    home_btn_bind(msg2_btn, "notice2");
 }
 
 /* 销毁主界面控件 */
@@ -340,6 +280,62 @@ static void home_on_resume(view_t *self)
 static void home_on_stop(view_t *self)
 {
     home_deinit(self);
+}
+
+/* 事件分发: 所有按钮点击在此按eventID字符串统一处理 */
+static void home_on_event(view_t *self, const char *event_id)
+{
+    (void)self;
+
+    if (event_id == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(event_id, "cam") == 0)
+    {
+        if (s_camera_cb != NULL)
+        {
+            s_camera_cb();          /* 进入摄像头页 */
+        }
+    }
+    else if (strcmp(event_id, "shell") == 0)
+    {
+        manager_gopage(SHELL_PAGE_ID);
+    }
+    else if (strcmp(event_id, "video") == 0)
+    {
+        manager_gopage(VIDEO_PAGE_ID);
+    }
+    else if (strcmp(event_id, "usb") == 0)
+    {
+        manager_gopage(USB_DISK_PAGE_ID);
+    }
+    else if (strcmp(event_id, "rec") == 0)
+    {
+        manager_gopage(RECORDER_PAGE_ID);
+    }
+    else if (strcmp(event_id, "wifi") == 0)
+    {
+        manager_gopage(WIFI_PAGE_ID);
+    }
+    else if (strcmp(event_id, "notice") == 0)
+    {
+        popup_notice_show("System0 notice!", 2000);     /* 顶部提示, 2秒后自动收回 */
+    }
+    else if (strcmp(event_id, "dialog") == 0)
+    {
+        popup_confirm_show("Are you sure you want to continue?",
+                           "Cancel", "OK", popup_cancel_cb, popup_ok_cb, NULL);
+    }
+    else if (strcmp(event_id, "toast") == 0)
+    {
+        popup_toast_show("System1 toast", 2000);        /* 中心toast, 2秒后自动收回 */
+    }
+    else if (strcmp(event_id, "notice2") == 0)
+    {
+        popup_notice_show("System0 notice", 2000);      /* 验证应用级弹窗盖不住系统级弹窗 */
+    }
 }
 
 /**********************
