@@ -98,15 +98,12 @@ static inline shell_ui_t *shell_ui(view_t *self)
     return container_of(self, shell_ui_t, base);
 }
 
-/* HOME按钮: 通过基类指针统一走事件分发 */
+/* HOME按钮: 事件交给框架统一派发给当前页面 */
 static void shell_home_btn_cb(lv_event_t *e)
 {
-    view_t *self = (view_t *)lv_event_get_user_data(e);
+    (void)e;
 
-    if (self != NULL && self->on_event != NULL)
-    {
-        self->on_event(self, "home");
-    }
+    manager_event("home");
 }
 
 /* 把光标竖条定位到输入行的当前光标处
@@ -234,8 +231,7 @@ static void shell_init(view_t *self)
     lv_obj_t *home = lv_btn_create(bar);
     lv_obj_set_size(home, 64, SHELL_BAR_H - 8);
     lv_obj_align(home, LV_ALIGN_RIGHT_MID, -4, 0);
-    /* 把基类指针传给按钮, 回调里即可直接分发事件 */
-    lv_obj_add_event_cb(home, shell_home_btn_cb, LV_EVENT_CLICKED, self);
+    lv_obj_add_event_cb(home, shell_home_btn_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *home_label = lv_label_create(home);
     lv_label_set_text(home_label, "HOME");

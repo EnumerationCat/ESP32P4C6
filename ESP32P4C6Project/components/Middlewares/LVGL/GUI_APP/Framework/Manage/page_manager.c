@@ -255,6 +255,25 @@ view_t *page_current(void)
     return list_top(&pm->ready);
 }
 
+bool manager_event(const char *event_id)
+{
+    view_t *top;
+
+    if (event_id == NULL)
+    {
+        return false;
+    }
+
+    top = page_current();
+    if (top == NULL || top->on_event == NULL)
+    {
+        return false;
+    }
+
+    top->on_event(top, event_id);
+    return true;
+}
+
 void page_manager_tick(void)
 {
     page_manager_t *pm = &g_page_manager;

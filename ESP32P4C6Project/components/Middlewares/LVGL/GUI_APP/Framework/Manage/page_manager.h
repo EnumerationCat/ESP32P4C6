@@ -13,6 +13,7 @@
  *  - page_open  -> 顶层页 on_pause 并挂起, 新页 on_start
  *  - page_close -> 当前页 on_stop, 恢复挂起栈顶页 on_start
  *  - tick       -> 先刷新所有弹窗, 再驱动当前页面(ready栈顶)的 on_update
+ *  - event      -> manager_event 把事件ID派发给当前页面(ready栈顶)的 on_event
  *
  * 页面对象必须长期存活(静态/全局), 管理器只串指针, 不负责内存。
  */
@@ -99,6 +100,15 @@ void page_back(void);
  * @retval      true:切换成功(含已在目标页); false:ID未注册或状态异常
  */
 bool manager_gopage(uint16_t id);
+
+/**
+ * @brief       向当前页面派发事件(Controller统一入口)
+ * @note        控件/输入回调只产出事件ID, 由本函数转发给 ready栈顶页面 的
+ *              on_event; 页面未实现 on_event 时忽略。只能在LVGL任务中调用
+ * @param       event_id: 事件ID字符串(以'\0'结尾)
+ * @retval      true:已派发; false:无当前页面或该页未实现on_event
+ */
+bool manager_event(const char *event_id);
 
 /**
  * @brief       当前页面(ready栈顶, 不含弹窗)

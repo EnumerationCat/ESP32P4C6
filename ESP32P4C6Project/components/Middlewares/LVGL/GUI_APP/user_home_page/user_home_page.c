@@ -73,25 +73,16 @@ static inline user_home_page_ui_t *home_ui(view_t *self)
     return container_of(self, user_home_page_ui_t, base);
 }
 
-/* 按钮统一事件适配: 点击时把 (视图, 事件ID) 转给 on_event 分发
- *  - 事件ID 存在按钮对象的 user_data
- *  - 视图指针 存在事件回调的 user_data(所有按钮相同) */
+/* 按钮事件适配: 点击时把事件ID交给框架统一派发给当前页面 */
 static void home_btn_event_cb(lv_event_t *e)
 {
-    view_t *self = (view_t *)lv_event_get_user_data(e);
-    const char *event_id = (const char *)lv_obj_get_user_data(lv_event_get_target(e));
-
-    if (self != NULL && event_id != NULL && self->on_event != NULL)
-    {
-        self->on_event(self, event_id);
-    }
+    manager_event((const char *)lv_event_get_user_data(e));
 }
 
-/* 给按钮绑定事件ID, 点击统一走 home_btn_event_cb */
+/* 给按钮绑定事件ID, 点击统一走 framework 的 manager_event */
 static void home_btn_bind(lv_obj_t *btn, const char *event_id)
 {
-    lv_obj_set_user_data(btn, (void *)event_id);
-    lv_obj_add_event_cb(btn, home_btn_event_cb, LV_EVENT_CLICKED, &s_ui.base);
+    lv_obj_add_event_cb(btn, home_btn_event_cb, LV_EVENT_CLICKED, (void *)event_id);
 }
 
 /* 双按钮弹窗的按钮回调(在弹窗关闭前调用) */
