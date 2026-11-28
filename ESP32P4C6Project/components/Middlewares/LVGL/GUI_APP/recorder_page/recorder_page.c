@@ -18,7 +18,6 @@
 #include "lvgl.h"
 #include "recorder.h"
 #include "sdmmc.h"
-#include "app_event.h"
 
 #include <string.h>
 
@@ -386,12 +385,6 @@ static void recorder_page_on_update(view_t *self)
     refresh_ui(self, false);
 }
 
-/* 录音任务结束回调(运行在recorder任务中, 只投递事件, 不碰LVGL) */
-static void recorder_done_event_cb(void)
-{
-    app_event_post("rec_done");
-}
-
 /* 事件分发: 录音任务结束 -> 立即刷新状态/文件名(仅当前页会收到) */
 static void recorder_page_on_event(view_t *self, const char *event_id)
 {
@@ -407,7 +400,6 @@ static void recorder_page_on_event(view_t *self, const char *event_id)
 
 void recorder_page_init(void)
 {
-    recorder_set_done_cb(recorder_done_event_cb);
     page_manager_init();
     page_register(&s_ui.base);
 }

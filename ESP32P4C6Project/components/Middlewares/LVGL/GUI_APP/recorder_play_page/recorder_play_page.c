@@ -15,7 +15,6 @@
 #include "lcd.h"
 #include "recorder.h"
 #include "sdmmc.h"
-#include "app_event.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -412,12 +411,6 @@ static void play_page_on_update(view_t *self)
     }
 }
 
-/* 播放任务结束回调(运行在播放任务中, 只投递事件, 不碰LVGL) */
-static void play_done_event_cb(void)
-{
-    app_event_post("play_done");
-}
-
 /* 事件分发: 播放自然结束 -> 恢复停止按钮/状态(仅当前页会收到) */
 static void play_page_on_event(view_t *self, const char *event_id)
 {
@@ -452,7 +445,6 @@ static void play_page_on_event(view_t *self, const char *event_id)
 
 void recorder_play_page_init(void)
 {
-    recorder_set_play_done_cb(play_done_event_cb);
     page_manager_init();
     page_register(&s_ui.base);
 }

@@ -1,14 +1,12 @@
 /**
  * @file camera_page.c
- * @brief 相机页: 摄像头画面经 PPA 缩放到 PSRAM 双缓冲, 由 lv_img 显示
+ * @brief 相机页: 显示 camera_stream_service 提供的摄像头帧, 叠加返回按钮
  *
  * 与其它页面相同的 C 式继承: base 必须是第一个成员。
  *
- * 线程模型:
- *  - 采集任务(core 0): 循环 mipi_cam_frame_read() 把画面写入"非显示中"的缓冲,
- *    同时更新 ready_idx; 不碰任何 LVGL 对象。
- *  - LVGL 定时器: 有新帧时切换 dsc.data 指针并 invalidate, 由 LVGL 任务真正渲染。
- * 因此 LVGL 永远显示 disp_idx 缓冲, 采集任务永远写另一个缓冲, 不会撕裂。
+ * 分层:
+ *  - 采集任务/双缓冲/异常检测在 Framework/Service/camera_stream_service;
+ *  - 本页只负责显示(LVGL 定时器取最新帧喂给 lv_img)和订阅 "cam_error" 事件。
  */
 
 #include "camera_page.h"
@@ -17,42 +15,23 @@
 #include "page_manager.h"
 #include "view.h"
 #include "container_of.h"
-#include "mipi_cam.h"
-#include "app_event.h"
+#include "camera_stream_service.h"
 #include "lvgl.h"
 
 #include <string.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include "esp_heap_caps.h"
-#include "esp_log.h"
-
-static const char *TAG = "camera_page";
-
 #define CAM_PAGE_TIMER_MS   20      /* LVGL 取新帧的轮询周期(ms) */
-#define CAM_PAGE_TASK_STACK 4096
-#define CAM_ERR_THRESHOLD   30      /* 连续取帧失败次数阈值(约300ms) */
 
-/* 派生视图: base 必须是第一个成员(C式继承) + 界面对象和采集状态 */
+/* 派生视图: base 必须是第一个成员(C式继承) + 界面对象 */
 typedef struct
 {
     view_t base;                    /* Framework基类(必须放第一位) */
 
     lv_obj_t *screen;               /* 相机页屏幕 */
     lv_obj_t *img;                  /* 显示摄像头画面的 lv_img */
-    lv_obj_t *tip;                  /* 摄像头不可用时的提示 */
+    lv_obj_t *tip;                  /* 摄像头不可用/异常时的提示 */
     lv_img_dsc_t dsc;               /* 指向当前显示缓冲的图像描述符 */
     lv_timer_t *timer;              /* 新帧轮询定时器(LVGL任务) */
-
-    TaskHandle_t cap_task;          /* 采集任务句柄, 退出后置NULL */
-    volatile bool running;          /* 采集任务运行标志 */
-    volatile int ready_idx;         /* 采集任务刚写完的缓冲下标(-1=无新帧) */
-    volatile int disp_idx;          /* 当前显示中的缓冲下标 */
-
-    uint8_t *buf[2];                /* 双缓冲: 面板分辨率 RGB565 */
-    size_t buf_size;                /* 单缓冲大小(已按cache行对齐) */
     bool src_set;                   /* 是否已把 dsc 设置给 lv_img(首帧后才设置) */
 } camera_page_ui_t;
 
@@ -67,10 +46,9 @@ static void camera_page_on_resume(view_t *self);
 static void camera_page_on_stop(view_t *self);
 static void camera_page_on_event(view_t *self, const char *event_id);
 
-static void cam_capture_task(void *arg);
 static void cam_frame_timer_cb(lv_timer_t *timer);
-static void cam_capture_start(void);
-static void cam_capture_stop(void);
+static bool cam_display_start(camera_page_ui_t *ui);
+static void cam_display_stop(camera_page_ui_t *ui);
 
 static camera_page_ui_t s_ui =
 {
@@ -92,7 +70,6 @@ static camera_page_ui_t s_ui =
         .data_size = 0,
         .data = NULL,
     },
-    .ready_idx = -1,
 };
 
 /* 由基类指针还原派生视图 */
@@ -102,74 +79,53 @@ static inline camera_page_ui_t *camera_ui(view_t *self)
 }
 
 /**********************
- *   采集
+ *   显示
  **********************/
 
-/* 采集任务: 把画面写进"非显示中"的缓冲, 等 LVGL 定时器来取 */
-static void cam_capture_task(void *arg)
+/* 在黑色背景上显示/更新提示文字(幂等) */
+static void camera_tip_show(camera_page_ui_t *ui, const char *text)
 {
-    camera_page_ui_t *ui = (camera_page_ui_t *)arg;
-    int fails = 0;              /* 连续取帧失败次数 */
-    bool err_reported = false;  /* 本轮错误是否已上报 */
-
-    while (ui->running)
+    if (ui->screen == NULL)
     {
-        /* 上一帧还没被 LVGL 取走时先等: 保证"正在显示的缓冲"和"ready 的缓冲"
-         * 都不会被采集任务覆盖, 只在两者之外的那个缓冲上写 */
-        if (ui->ready_idx >= 0)
-        {
-            vTaskDelay(pdMS_TO_TICKS(2));
-            continue;
-        }
-
-        int idx = 1 - ui->disp_idx;
-
-        if (mipi_cam_frame_read(ui->buf[idx], ui->buf_size) == ESP_OK)
-        {
-            ui->ready_idx = idx;
-            fails = 0;
-            err_reported = false;
-        }
-        else
-        {
-            vTaskDelay(pdMS_TO_TICKS(10));
-
-            /* 连续失败到阈值才上报一次, 避免刷屏; 恢复出帧后允许再次上报 */
-            if (++fails >= CAM_ERR_THRESHOLD && !err_reported)
-            {
-                err_reported = true;
-                app_event_post("cam_error");
-            }
-        }
+        return;
     }
 
-    mipi_cam_frame_end();
-    ui->cap_task = NULL;
-    vTaskDelete(NULL);
+    if (ui->tip == NULL)
+    {
+        ui->tip = lv_label_create(ui->screen);
+        lv_obj_set_style_text_color(ui->tip, lv_color_white(), LV_PART_MAIN);
+        lv_obj_center(ui->tip);
+    }
+
+    lv_label_set_text(ui->tip, text);
 }
 
 /* LVGL 定时器: 有新帧就切换数据源并重绘 */
 static void cam_frame_timer_cb(lv_timer_t *timer)
 {
+    const void *frame;
+
     (void)timer;
 
-    int idx = s_ui.ready_idx;
-
-    if (idx < 0 || s_ui.img == NULL)
+    if (s_ui.img == NULL)
     {
         return;
     }
 
-    /* 恢复出帧: 移除之前因采集异常显示的提示 */
+    frame = camera_stream_take_frame();
+    if (frame == NULL)
+    {
+        return;
+    }
+
+    /* 恢复出帧: 移除之前显示的异常提示 */
     if (s_ui.tip != NULL)
     {
         lv_obj_del(s_ui.tip);
         s_ui.tip = NULL;
     }
 
-    s_ui.ready_idx = -1;
-    s_ui.disp_idx  = idx;
-    s_ui.dsc.data  = s_ui.buf[idx];
+    s_ui.dsc.data = (void *)frame;
 
     if (!s_ui.src_set)
     {
@@ -183,106 +139,42 @@ static void cam_frame_timer_cb(lv_timer_t *timer)
     lv_obj_invalidate(s_ui.img);
 }
 
-/* 分配双缓冲(只在首次进入时分配, 之后复用) */
-static bool cam_buffers_alloc(void)
+/* 启动采集并开始轮询; false=摄像头不可用 */
+static bool cam_display_start(camera_page_ui_t *ui)
 {
     uint16_t w;
     uint16_t h;
 
-    if (!mipi_cam_frame_size(&w, &h))
+    if (!camera_service_start())
     {
         return false;
     }
 
-    s_ui.buf_size = mipi_cam_frame_buf_size();
-    s_ui.dsc.header.w  = w;
-    s_ui.dsc.header.h  = h;
-    s_ui.dsc.data_size = (uint32_t)w * h * 2;
-
-    if (s_ui.buf[0] != NULL && s_ui.buf[1] != NULL)
+    if (camera_stream_frame_size(&w, &h))
     {
-        return true;
+        ui->dsc.header.w  = w;
+        ui->dsc.header.h  = h;
+        ui->dsc.data_size = camera_stream_frame_bytes();
     }
 
-    size_t align = mipi_cam_frame_buf_align();
-
-    for (int i = 0; i < 2; i++)
+    if (ui->timer == NULL)
     {
-        s_ui.buf[i] = heap_caps_aligned_alloc(align, s_ui.buf_size,
-                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (s_ui.buf[i] == NULL)
-        {
-            ESP_LOGE(TAG, "alloc frame buffer %d failed (%u bytes)", i, (unsigned)s_ui.buf_size);
-            heap_caps_free(s_ui.buf[0]);
-            s_ui.buf[0] = NULL;
-            return false;
-        }
+        ui->timer = lv_timer_create(cam_frame_timer_cb, CAM_PAGE_TIMER_MS, NULL);
     }
 
     return true;
 }
 
-/* 进入采集: 开流 + 起采集任务 + 起LVGL定时器 */
-static void cam_capture_start(void)
+/* 停止轮询并停采集 */
+static void cam_display_stop(camera_page_ui_t *ui)
 {
-    if (s_ui.cap_task != NULL)
+    if (ui->timer != NULL)
     {
-        return;
+        lv_timer_del(ui->timer);
+        ui->timer = NULL;
     }
 
-    if (!cam_buffers_alloc())
-    {
-        ESP_LOGE(TAG, "camera not ready");
-        return;
-    }
-
-    if (mipi_cam_frame_begin() != ESP_OK)
-    {
-        ESP_LOGE(TAG, "camera stream start failed");
-        return;
-    }
-
-    s_ui.ready_idx = -1;
-    s_ui.disp_idx  = 0;
-    s_ui.running   = true;
-
-    if (xTaskCreatePinnedToCore(cam_capture_task, "cam page", CAM_PAGE_TASK_STACK,
-                                &s_ui, 4, &s_ui.cap_task, 0) != pdPASS)
-    {
-        ESP_LOGE(TAG, "create capture task failed");
-        s_ui.running = false;
-        mipi_cam_frame_end();
-        return;
-    }
-
-    s_ui.timer = lv_timer_create(cam_frame_timer_cb, CAM_PAGE_TIMER_MS, NULL);
-}
-
-/* 停止采集: 等采集任务自行收尾(STREAMOFF 在它自己的任务里做) */
-static void cam_capture_stop(void)
-{
-    s_ui.running = false;
-
-    for (int i = 0; i < 100 && s_ui.cap_task != NULL; i++)
-    {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
-    if (s_ui.cap_task != NULL)
-    {
-        /* 阻塞在取帧里: 关流让 DQBUF 返回错误, 再等它退出 */
-        mipi_cam_frame_end();
-        for (int i = 0; i < 50 && s_ui.cap_task != NULL; i++)
-        {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-    }
-
-    if (s_ui.timer != NULL)
-    {
-        lv_timer_del(s_ui.timer);
-        s_ui.timer = NULL;
-    }
+    camera_service_stop();
 }
 
 /**********************
@@ -332,6 +224,12 @@ static void camera_page_destroy(view_t *self)
 {
     camera_page_ui_t *ui = camera_ui(self);
 
+    if (ui->timer != NULL)
+    {
+        lv_timer_del(ui->timer);
+        ui->timer = NULL;
+    }
+
     if (ui->screen == NULL)
     {
         return;
@@ -348,7 +246,7 @@ static void camera_page_destroy(view_t *self)
  *   页面生命周期
  **********************/
 
-/* 首次进入: 建界面 + 启动采集 */
+/* 首次进入: 建界面 + 启动显示/采集 */
 static void camera_page_on_start(view_t *self)
 {
     camera_page_ui_t *ui = camera_ui(self);
@@ -357,23 +255,16 @@ static void camera_page_on_start(view_t *self)
     lv_scr_load(ui->screen);
     lv_obj_invalidate(ui->screen);
 
-    cam_capture_start();
-
-    if (ui->cap_task == NULL && ui->tip == NULL)
+    if (!cam_display_start(ui))
     {
-        /* 摄像头不可用: 在黑色背景上给个提示 */
-        ui->tip = lv_label_create(ui->screen);
-        lv_label_set_text(ui->tip, "Camera not available");
-        lv_obj_set_style_text_color(ui->tip, lv_color_white(), LV_PART_MAIN);
-        lv_obj_center(ui->tip);
+        camera_tip_show(ui, "Camera not available");
     }
 }
 
 /* 被其它页覆盖: 暂停采集, 省电也避免两次抢摄像头 */
 static void camera_page_on_pause(view_t *self)
 {
-    (void)self;
-    cam_capture_stop();
+    cam_display_stop(camera_ui(self));
 }
 
 /* 恢复: 重新开流 */
@@ -385,19 +276,22 @@ static void camera_page_on_resume(view_t *self)
     {
         lv_scr_load(ui->screen);
         lv_obj_invalidate(ui->screen);
-    }
 
-    cam_capture_start();
+        if (!cam_display_start(ui))
+        {
+            camera_tip_show(ui, "Camera not available");
+        }
+    }
 }
 
-/* 离开页面: 停采集并销毁控件(缓冲保留复用) */
+/* 离开页面: 停采集并销毁控件(服务内缓冲保留复用) */
 static void camera_page_on_stop(view_t *self)
 {
-    cam_capture_stop();
+    cam_display_stop(camera_ui(self));
     camera_page_destroy(self);
 }
 
-/* 事件分发: 采集异常 -> 在画面上显示提示(仅当前页会收到) */
+/* 事件分发: 采集异常 -> 显示提示(仅当前页会收到) */
 static void camera_page_on_event(view_t *self, const char *event_id)
 {
     camera_page_ui_t *ui = camera_ui(self);
@@ -407,19 +301,10 @@ static void camera_page_on_event(view_t *self, const char *event_id)
         return;
     }
 
-    if (strcmp(event_id, "cam_error") != 0)
+    if (strcmp(event_id, "cam_error") == 0)
     {
-        return;
+        camera_tip_show(ui, "Camera error");
     }
-
-    if (ui->tip == NULL)
-    {
-        ui->tip = lv_label_create(ui->screen);
-        lv_obj_set_style_text_color(ui->tip, lv_color_white(), LV_PART_MAIN);
-        lv_obj_center(ui->tip);
-    }
-
-    lv_label_set_text(ui->tip, "Camera error");
 }
 
 /**********************

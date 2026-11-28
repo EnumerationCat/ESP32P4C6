@@ -301,7 +301,10 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				LVGL/GUI_APP/Framework/Manage/list_head.c
 				LVGL/GUI_APP/Framework/Manage/page_manager.c
 				LVGL/GUI_APP/Framework/Manage/page_init.c
-				LVGL/GUI_APP/Framework/Manage/app_event.c
+				LVGL/GUI_APP/Framework/Service/app_event.c
+				LVGL/GUI_APP/Framework/Service/recorder_event_service.c
+				LVGL/GUI_APP/Framework/Service/wifi_event_service.c
+				LVGL/GUI_APP/Framework/Service/camera_stream_service.c
 				LVGL/GUI_APP/Framework/shell_core.c
 				LVGL/GUI_APP/Framework/command.c
 				LVGL/GUI_APP/Framework/Model/shell_input_uart.c
@@ -341,6 +344,7 @@ set(include_dirs wifi_manager
 				 LVGL/GUI_APP/Framework/View
 				 LVGL/GUI_APP/Framework/Manage
 				 LVGL/GUI_APP/Framework/POPUP
+				 LVGL/GUI_APP/Framework/Service
 				 LVGL/GUI_APP/shell_page
 				 LVGL/GUI_APP/user_home_page
 				 LVGL/GUI_APP/video_page

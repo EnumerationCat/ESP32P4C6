@@ -3,8 +3,9 @@
  * @brief WiFi连接页: 下拉框选择热点 + 密码输入框/键盘 + 连接
  *
  * 与其它页面相同的 C 式继承: base 必须是第一个成员。
- * 扫描由 wifi_manager_scan() 在独立任务中完成, 结果写入 wifi_scan_model
- * (Model层, 带锁缓存); 本页只负责取走字符串渲染下拉框并产生事件。
+ * 扫描/连接状态的事件桥接在 Framework/Service/wifi_event_service;
+ * 扫描结果写入 wifi_scan_model(Model层, 带锁缓存), 本页只负责取走字符串
+ * 渲染下拉框, 并在 on_event 里订阅 "wifi_scan_done"/"wifi_connected" 等事件。
  */
 
 #include "wifi_page.h"
@@ -15,7 +16,7 @@
 #include "lvgl.h"
 #include "wifi_manager.h"
 #include "ap_wifi.h"
-#include "app_event.h"
+#include "wifi_event_service.h"
 #include "wifi_scan_model.h"
 
 #include <stdio.h>
@@ -84,15 +85,6 @@ static inline wifi_page_ui_t *wifi_ui(view_t *self)
     return container_of(self, wifi_page_ui_t, base);
 }
 
-/* 扫描完成回调(运行在扫描任务中, 不能操作LVGL): 写Model并投递事件 */
-static void wifi_scan_cb(int num, wifi_ap_record_t *records)
-{
-    wifi_scan_model_on_result(num, records);
-
-    /* 通知LVGL任务立即上屏; 页面不可见时由 on_update 兜底 */
-    app_event_post("wifi_scan_done");
-}
-
 /* 发起扫描(幂等: 正在扫描时忽略) */
 static void wifi_scan_start(wifi_page_ui_t *ui)
 {
@@ -108,7 +100,7 @@ static void wifi_scan_start(wifi_page_ui_t *ui)
         lv_label_set_text(ui->status_label, "Scanning...");
     }
 
-    if (wifi_manager_scan(wifi_scan_cb) != ESP_OK)
+    if (wifi_event_service_scan() != ESP_OK)
     {
         wifi_scan_model_timeout();
 
@@ -185,13 +177,6 @@ static void wifi_refresh_status(wifi_page_ui_t *ui, int64_t now)
         ui->last_connected = false;
         lv_label_set_text(ui->status_label, "Disconnected");
     }
-}
-
-/* WiFi状态变化回调(运行在esp_event任务中, 只投递事件, 不碰LVGL) */
-static void wifi_state_event_cb(WIFI_STATE state)
-{
-    app_event_post(state == WIFI_STATE_CONNECTED ? "wifi_connected"
-                                                 : "wifi_disconnected");
 }
 
 /* 事件分发: 扫描完成/连接状态变化(由框架派发给当前页) */
@@ -464,17 +449,6 @@ static void wifi_page_on_update(view_t *self)
 
 void wifi_page_init(void)
 {
-    static bool wifi_inited = false;
-
-    if (!wifi_inited)
-    {
-        /* WiFi协议栈初始化(原在main): 启动STA但不连接任何热点,
-         * 具体连哪个由本页面选择; 连接状态变更通过 app_event 投递给LVGL任务 */
-        ap_wifi_init(wifi_state_event_cb);
-        wifi_scan_model_init();
-        wifi_inited = true;
-    }
-
     page_manager_init();
     page_register(&s_ui.base);
 }
