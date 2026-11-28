@@ -305,10 +305,12 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				LVGL/GUI_APP/Framework/Service/recorder_event_service.c
 				LVGL/GUI_APP/Framework/Service/wifi_event_service.c
 				LVGL/GUI_APP/Framework/Service/camera_stream_service.c
+				LVGL/GUI_APP/Framework/Service/video_event_service.c
 				LVGL/GUI_APP/Framework/shell_core.c
 				LVGL/GUI_APP/Framework/command.c
 				LVGL/GUI_APP/Framework/Model/shell_input_uart.c
 				LVGL/GUI_APP/Framework/Model/wifi_scan_model.c
+				LVGL/GUI_APP/Framework/Model/video_list_model.c
 )
 
 set(include_dirs wifi_manager

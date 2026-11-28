@@ -21,6 +21,10 @@
 
 #define VIDEOPLAY_DIR   "/User/VIDEO"   /* 视频目录(SD卡根目录下的 VIDEO) */
 
+/* 播放任务结束回调: 在播放任务上下文中调用, 不得操作LVGL,
+ * 只适合投递队列/置标志(供上层桥接成UI事件) */
+typedef void (*videoplay_done_cb_t)(void);
+
 /**
  * @brief       异步播放一个 AVI 文件
  * @param       path: 文件完整路径(如 "/User/VIDEO/a.avi")
@@ -40,5 +44,12 @@ bool videoplay_active(void);
  * @retval      无
  */
 void videoplay_stop(void);
+
+/**
+ * @brief       注册播放任务结束回调(正常结束/出错/触摸退出都会调用); 传NULL取消
+ * @param       cb: 回调函数
+ * @retval      无
+ */
+void videoplay_set_done_cb(videoplay_done_cb_t cb);
 
 #endif /* __VIDEOPLAY_H */

@@ -1,9 +1,13 @@
 /**
  * @file video_page.c
- * @brief 视频页: 扫描/User/VIDEO下的.avi文件并列表展示, 点击进入全屏播放
+ * @brief 视频页: 展示 /User/VIDEO 下的 .avi 列表, 点击进入全屏播放
  *
- * 与 user_home_page 相同的 C 式继承: base 必须是第一个成员。
- * 播放本身由 BSP 的 videoplay 任务完成, 这里只负责文件列表和启动播放。
+ * 与其它页面相同的 C 式继承: base 必须是第一个成员。
+ *
+ * 分层:
+ *  - 文件扫描/路径缓存在 Framework/Model/video_list_model;
+ *  - 播放结束的事件桥接在 Framework/Service/video_event_service;
+ *  - 本页只渲染列表、发起播放命令, 并在 on_event 里订阅 "video_done"。
  */
 
 #include "video_page.h"
@@ -15,18 +19,13 @@
 #include "lcd.h"
 #include "videoplay.h"
 #include "sdmmc.h"
+#include "video_list_model.h"
 
-#include <ctype.h>
-#include <dirent.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
 
 static const char *TAG = "video_page";
-
-#define VIDEO_MAX_FILES     24      /* 列表最多展示的文件数 */
-#define VIDEO_PATH_LEN      300     /* 完整路径长度上限 */
 
 /* 派生视图: base必须是第一个成员(C式继承) + LCD界面对象 */
 typedef struct
@@ -44,6 +43,7 @@ static void video_page_destroy(view_t *self);
 static void video_page_on_start(view_t *self);
 static void video_page_on_resume(view_t *self);
 static void video_page_on_stop(view_t *self);
+static void video_page_on_event(view_t *self, const char *event_id);
 
 static video_page_ui_t s_ui =
 {
@@ -56,14 +56,12 @@ static video_page_ui_t s_ui =
         .on_start  = video_page_on_start,
         .on_resume = video_page_on_resume,
         .on_stop   = video_page_on_stop,
+        .on_event  = video_page_on_event,
     },
 };
 
-static char s_paths[VIDEO_MAX_FILES][VIDEO_PATH_LEN];
-static int s_file_count = 0;
-
 /**********************
- *   文件列表
+ *   内部辅助
  **********************/
 
 /* 由基类指针还原派生视图 */
@@ -72,69 +70,21 @@ static inline video_page_ui_t *video_ui(view_t *self)
     return container_of(self, video_page_ui_t, base);
 }
 
-/* 判断文件名是否以 .avi 结尾(不区分大小写) */
-static bool is_avi_name(const char *name)
-{
-    size_t len = strlen(name);
-
-    if (len < 5)
-    {
-        return false;
-    }
-
-    const char *ext = name + len - 4;
-
-    return ext[0] == '.' &&
-           tolower((unsigned char)ext[1]) == 'a' &&
-           tolower((unsigned char)ext[2]) == 'v' &&
-           tolower((unsigned char)ext[3]) == 'i';
-}
-
-/* 扫描 /User/VIDEO, 记录前 VIDEO_MAX_FILES 个 avi 文件路径 */
-static void scan_video_files(void)
-{
-    DIR *dir;
-    struct dirent *ent;
-
-    s_file_count = 0;
-
-    dir = opendir(VIDEOPLAY_DIR);
-    if (dir == NULL)
-    {
-        ESP_LOGW(TAG, "open %s failed", VIDEOPLAY_DIR);
-        return;
-    }
-
-    while ((ent = readdir(dir)) != NULL && s_file_count < VIDEO_MAX_FILES)
-    {
-        if (!is_avi_name(ent->d_name))
-        {
-            continue;
-        }
-
-        snprintf(s_paths[s_file_count], sizeof(s_paths[0]), "%s/%s", VIDEOPLAY_DIR, ent->d_name);
-        s_file_count++;
-    }
-
-    closedir(dir);
-
-    ESP_LOGI(TAG, "found %d avi file(s)", s_file_count);
-}
-
 /* 列表按钮点击: 启动播放 */
 static void video_btn_event_cb(lv_event_t *e)
 {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
+    const char *path = video_list_model_path(index);
 
-    if (index < 0 || index >= s_file_count)
+    if (path == NULL)
     {
         return;
     }
 
-    esp_err_t ret = videoplay_play(s_paths[index]);
+    esp_err_t ret = videoplay_play(path);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "play %s failed: %s", s_paths[index], esp_err_to_name(ret));
+        ESP_LOGE(TAG, "play %s failed: %s", path, esp_err_to_name(ret));
     }
 }
 
@@ -149,10 +99,11 @@ static void back_btn_event_cb(lv_event_t *e)
  *   页面生命周期
  **********************/
 
-/* 创建视频页控件(幂等) */
+/* 创建视频页控件(幂等), 每次创建都重新扫描目录 */
 static void video_page_create(view_t *self)
 {
     video_page_ui_t *ui = video_ui(self);
+    int count;
 
     if (ui->screen != NULL)
     {
@@ -190,19 +141,18 @@ static void video_page_create(view_t *self)
         return;
     }
 
-    scan_video_files();
+    video_list_model_refresh();
+    count = video_list_model_count();
 
-    if (s_file_count == 0)
+    if (count == 0)
     {
         lv_list_add_text(ui->list, "No .avi in /VIDEO");
         return;
     }
 
-    for (int i = 0; i < s_file_count; i++)
+    for (int i = 0; i < count; i++)
     {
-        const char *name = strrchr(s_paths[i], '/');
-
-        name = (name != NULL) ? name + 1 : s_paths[i];
+        const char *name = video_list_model_name(i);
 
         lv_obj_t *btn = lv_list_add_btn(ui->list, NULL, name);
         lv_obj_add_event_cb(btn, video_btn_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
@@ -250,6 +200,22 @@ static void video_page_on_resume(view_t *self)
 static void video_page_on_stop(view_t *self)
 {
     video_page_destroy(self);
+}
+
+/* 事件分发: 播放结束 - 播放器独占过 LCD, 整屏重绘找回界面(仅当前页会收到) */
+static void video_page_on_event(view_t *self, const char *event_id)
+{
+    video_page_ui_t *ui = video_ui(self);
+
+    if (event_id == NULL || ui->screen == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(event_id, "video_done") == 0)
+    {
+        lv_obj_invalidate(ui->screen);
+    }
 }
 
 /**********************

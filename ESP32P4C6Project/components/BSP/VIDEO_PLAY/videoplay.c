@@ -44,6 +44,8 @@ typedef struct
 
 static videoplay_state_t s_play = {0};
 
+static videoplay_done_cb_t s_done_cb = NULL;    /* 播放任务结束回调 */
+
 /**
  * @brief       帧间隔定时器回调
  * @param       arg: 未使用
@@ -299,6 +301,12 @@ cleanup:
 
     ESP_LOGI(TAG, "playback finished (%s)", ok ? "ok" : "error");
     s_play.active = false;
+
+    if (s_done_cb != NULL)
+    {
+        s_done_cb();
+    }
+
     vTaskDelete(NULL);
 }
 
@@ -356,4 +364,14 @@ bool videoplay_active(void)
 void videoplay_stop(void)
 {
     s_play.stop_req = true;
+}
+
+/**
+ * @brief       注册播放任务结束回调
+ * @param       cb: 回调函数; 传NULL取消
+ * @retval      无
+ */
+void videoplay_set_done_cb(videoplay_done_cb_t cb)
+{
+    s_done_cb = cb;
 }
