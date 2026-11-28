@@ -3,7 +3,8 @@
  * @brief 录音回放页: 扫描/User/RECORDER下的WAV并列表播放
  *
  * 与 video_page 相同的 C 式继承: base 必须是第一个成员。
- * 播放本身由 BSP 的 recorder 播放任务完成, 这里只负责列表和启动/停止。
+ * 文件扫描/缓存在 Framework/Model/recorder_list_model; 播放本身由 BSP 的
+ * recorder 播放任务完成, 这里只渲染列表、发起播放命令并订阅 "play_done"。
  */
 
 #include "recorder_play_page.h"
@@ -15,10 +16,8 @@
 #include "lcd.h"
 #include "recorder.h"
 #include "sdmmc.h"
+#include "file_list_model.h"
 
-#include <ctype.h>
-#include <dirent.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "esp_timer.h"
@@ -26,9 +25,7 @@
 
 static const char *TAG = "recorder_play";
 
-#define PLAY_DIR            MOUNT_POINT "/RECORDER"     /* "/User/RECORDER" */
-#define PLAY_MAX_FILES      32                          /* 列表最多展示的文件数 */
-#define PLAY_PATH_LEN       300                         /* 完整路径长度上限 */
+#define PLAY_DIR    MOUNT_POINT "/RECORDER"     /* "/User/RECORDER" */
 
 /* 派生视图: base必须是第一个成员(C式继承) + LCD界面对象 */
 typedef struct
@@ -56,6 +53,9 @@ static void play_page_on_update(view_t *self);
 static void play_page_on_event(view_t *self, const char *event_id);
 static void file_btn_event_cb(lv_event_t *e);
 
+/* .wav 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
+static file_list_t s_files;
+
 static recorder_play_page_ui_t s_ui =
 {
     .base =
@@ -73,9 +73,6 @@ static recorder_play_page_ui_t s_ui =
     },
 };
 
-static char s_paths[PLAY_MAX_FILES][PLAY_PATH_LEN];
-static int s_count = 0;
-
 /**********************
  *   文件列表
  **********************/
@@ -86,59 +83,11 @@ static inline recorder_play_page_ui_t *play_ui(view_t *self)
     return container_of(self, recorder_play_page_ui_t, base);
 }
 
-/* 判断文件名是否以 .wav 结尾(不区分大小写) */
-static bool is_wav_name(const char *name)
-{
-    size_t len = strlen(name);
-
-    if (len < 5)
-    {
-        return false;
-    }
-
-    const char *ext = name + len - 4;
-
-    return ext[0] == '.' &&
-           tolower((unsigned char)ext[1]) == 'w' &&
-           tolower((unsigned char)ext[2]) == 'a' &&
-           tolower((unsigned char)ext[3]) == 'v';
-}
-
-/* 扫描 /User/RECORDER, 记录前 PLAY_MAX_FILES 个 wav 文件路径 */
-static void scan_files(void)
-{
-    DIR *dir;
-    struct dirent *ent;
-
-    s_count = 0;
-
-    dir = opendir(PLAY_DIR);
-    if (dir == NULL)
-    {
-        ESP_LOGW(TAG, "open %s failed", PLAY_DIR);
-        return;
-    }
-
-    while ((ent = readdir(dir)) != NULL && s_count < PLAY_MAX_FILES)
-    {
-        if (!is_wav_name(ent->d_name))
-        {
-            continue;
-        }
-
-        snprintf(s_paths[s_count], sizeof(s_paths[0]), "%s/%s", PLAY_DIR, ent->d_name);
-        s_count++;
-    }
-
-    closedir(dir);
-
-    ESP_LOGI(TAG, "found %d recording(s)", s_count);
-}
-
 /* 清空并重新填充列表(每次进入/恢复都重新扫描, 以便看到新录音) */
 static void populate_list(recorder_play_page_ui_t *ui)
 {
     int i;
+    int count;
 
     if (ui->list == NULL)
     {
@@ -146,7 +95,6 @@ static void populate_list(recorder_play_page_ui_t *ui)
     }
 
     lv_obj_clean(ui->list);
-    s_count = 0;
 
     if (sdmmc_mount_state != SDMMC_MOUNT_STATE_MOUNTED)
     {
@@ -154,21 +102,18 @@ static void populate_list(recorder_play_page_ui_t *ui)
         return;
     }
 
-    scan_files();
+    file_list_scan(&s_files, PLAY_DIR, "wav");
+    count = file_list_count(&s_files);
 
-    if (s_count == 0)
+    if (count == 0)
     {
         lv_list_add_text(ui->list, "No recordings");
         return;
     }
 
-    for (i = 0; i < s_count; i++)
+    for (i = 0; i < count; i++)
     {
-        const char *base = strrchr(s_paths[i], '/');
-
-        base = (base != NULL) ? base + 1 : s_paths[i];
-
-        lv_obj_t *btn = lv_list_add_btn(ui->list, NULL, base);
+        lv_obj_t *btn = lv_list_add_btn(ui->list, NULL, file_list_name(&s_files, i));
         lv_obj_add_event_cb(btn, file_btn_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
 }
@@ -181,9 +126,10 @@ static void populate_list(recorder_play_page_ui_t *ui)
 static void file_btn_event_cb(lv_event_t *e)
 {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
+    const char *path = file_list_path(&s_files, index);
     esp_err_t ret;
 
-    if (index < 0 || index >= s_count)
+    if (path == NULL)
     {
         return;
     }
@@ -193,14 +139,12 @@ static void file_btn_event_cb(lv_event_t *e)
         recorder_play_stop();
     }
 
-    ret = recorder_play(s_paths[index]);
+    ret = recorder_play(path);
 
     if (ret == ESP_OK)
     {
-        const char *base = strrchr(s_paths[index], '/');
-
-        base = (base != NULL) ? base + 1 : s_paths[index];
-        lv_label_set_text_fmt(s_ui.status_label, "Playing: %s", base);
+        lv_label_set_text_fmt(s_ui.status_label, "Playing: %s",
+                              file_list_name(&s_files, index));
         lv_obj_clear_state(s_ui.stop_btn, LV_STATE_DISABLED);
         s_ui.last_playing = true;
     }

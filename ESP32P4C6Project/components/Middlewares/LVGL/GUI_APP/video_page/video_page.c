@@ -19,7 +19,7 @@
 #include "lcd.h"
 #include "videoplay.h"
 #include "sdmmc.h"
-#include "video_list_model.h"
+#include "file_list_model.h"
 
 #include <string.h>
 
@@ -32,7 +32,7 @@ typedef struct
 {
     view_t base;                    /* Framework基类(必须放第一位) */
     lv_obj_t *screen;               /* 视频页屏幕 */
-    lv_obj_t *list;                 /* 文件列表 */
+    lv_obj_t *list;                 /* 文件列表控件 */
 } video_page_ui_t;
 
 /**********************
@@ -44,6 +44,9 @@ static void video_page_on_start(view_t *self);
 static void video_page_on_resume(view_t *self);
 static void video_page_on_stop(view_t *self);
 static void video_page_on_event(view_t *self, const char *event_id);
+
+/* .avi 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
+static file_list_t s_files;
 
 static video_page_ui_t s_ui =
 {
@@ -74,7 +77,7 @@ static inline video_page_ui_t *video_ui(view_t *self)
 static void video_btn_event_cb(lv_event_t *e)
 {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
-    const char *path = video_list_model_path(index);
+    const char *path = file_list_path(&s_files, index);
 
     if (path == NULL)
     {
@@ -141,8 +144,8 @@ static void video_page_create(view_t *self)
         return;
     }
 
-    video_list_model_refresh();
-    count = video_list_model_count();
+    file_list_scan(&s_files, VIDEOPLAY_DIR, "avi");
+    count = file_list_count(&s_files);
 
     if (count == 0)
     {
@@ -152,9 +155,7 @@ static void video_page_create(view_t *self)
 
     for (int i = 0; i < count; i++)
     {
-        const char *name = video_list_model_name(i);
-
-        lv_obj_t *btn = lv_list_add_btn(ui->list, NULL, name);
+        lv_obj_t *btn = lv_list_add_btn(ui->list, NULL, file_list_name(&s_files, i));
         lv_obj_add_event_cb(btn, video_btn_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
 }
