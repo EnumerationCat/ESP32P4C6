@@ -53,7 +53,7 @@ static void recorder_page_on_resume(view_t *self);
 static void recorder_page_on_pause(view_t *self);
 static void recorder_page_on_stop(view_t *self);
 static void recorder_page_on_update(view_t *self);
-static void recorder_page_on_click(view_t *self, const char *click_id, intptr_t arg);
+static void recorder_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
 static void recorder_page_on_event(view_t *self, const char *event_id);
 
 static recorder_page_ui_t s_ui =
@@ -188,9 +188,9 @@ static void rec_stop(view_t *self)
 }
 
 /* 点击分发 */
-static void recorder_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+static void recorder_page_on_click(view_t *self, const char *click_id, intptr_t user_data)
 {
-    (void)arg;
+    (void)user_data;
 
     if (click_id == NULL)
     {

@@ -51,7 +51,7 @@ static void play_page_on_resume(view_t *self);
 static void play_page_on_pause(view_t *self);
 static void play_page_on_stop(view_t *self);
 static void play_page_on_update(view_t *self);
-static void play_page_on_click(view_t *self, const char *click_id, intptr_t arg);
+static void play_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
 static void play_page_on_event(view_t *self, const char *event_id);
 
 /* .wav 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
@@ -167,7 +167,7 @@ static void play_stop(void)
 }
 
 /* 点击分发 */
-static void play_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+static void play_page_on_click(view_t *self, const char *click_id, intptr_t user_data)
 {
     (void)self;
 
@@ -178,7 +178,7 @@ static void play_page_on_click(view_t *self, const char *click_id, intptr_t arg)
 
     if (strcmp(click_id, "file") == 0)
     {
-        play_file((int)arg);
+        play_file((int)user_data);
     }
     else if (strcmp(click_id, "stop") == 0)
     {

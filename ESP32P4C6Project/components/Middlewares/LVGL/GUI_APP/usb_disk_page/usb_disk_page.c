@@ -40,7 +40,7 @@ static void usb_disk_page_destroy(view_t *self);
 static void usb_disk_page_on_start(view_t *self);
 static void usb_disk_page_on_resume(view_t *self);
 static void usb_disk_page_on_stop(view_t *self);
-static void usb_disk_page_on_click(view_t *self, const char *click_id, intptr_t arg);
+static void usb_disk_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
 
 static usb_disk_page_ui_t s_ui =
 {
@@ -125,9 +125,9 @@ static void usb_disk_toggle(view_t *self)
 }
 
 /* 点击分发 */
-static void usb_disk_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+static void usb_disk_page_on_click(view_t *self, const char *click_id, intptr_t user_data)
 {
-    (void)arg;
+    (void)user_data;
 
     if (click_id == NULL)
     {

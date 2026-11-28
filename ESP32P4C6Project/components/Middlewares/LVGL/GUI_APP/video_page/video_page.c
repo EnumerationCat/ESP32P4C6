@@ -44,7 +44,7 @@ static void video_page_destroy(view_t *self);
 static void video_page_on_start(view_t *self);
 static void video_page_on_resume(view_t *self);
 static void video_page_on_stop(view_t *self);
-static void video_page_on_click(view_t *self, const char *click_id, intptr_t arg);
+static void video_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
 static void video_page_on_event(view_t *self, const char *event_id);
 
 /* .avi 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
@@ -182,7 +182,7 @@ static void video_page_on_stop(view_t *self)
 }
 
 /* 点击分发: 返回 / 列表行播放 */
-static void video_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+static void video_page_on_click(view_t *self, const char *click_id, intptr_t user_data)
 {
     (void)self;
 
@@ -199,7 +199,7 @@ static void video_page_on_click(view_t *self, const char *click_id, intptr_t arg
 
     if (strcmp(click_id, "file") == 0)
     {
-        const char *path = file_list_path(&s_files, (int)arg);
+        const char *path = file_list_path(&s_files, (int)user_data);
 
         if (path == NULL)
         {

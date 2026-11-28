@@ -257,7 +257,7 @@ view_t *page_current(void)
     return list_top(&pm->ready);
 }
 
-bool manager_click(const char *click_id, intptr_t arg)
+bool manager_click(const char *click_id, intptr_t user_data)
 {
     view_t *top;
 
@@ -272,7 +272,7 @@ bool manager_click(const char *click_id, intptr_t arg)
         return false;
     }
 
-    top->on_click(top, click_id, arg);
+    top->on_click(top, click_id, user_data);
     return true;
 }
 

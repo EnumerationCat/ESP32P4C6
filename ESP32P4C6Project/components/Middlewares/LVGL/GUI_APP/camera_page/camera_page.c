@@ -45,7 +45,7 @@ static void camera_page_on_start(view_t *self);
 static void camera_page_on_pause(view_t *self);
 static void camera_page_on_resume(view_t *self);
 static void camera_page_on_stop(view_t *self);
-static void camera_page_on_click(view_t *self, const char *click_id, intptr_t arg);
+static void camera_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
 static void camera_page_on_event(view_t *self, const char *event_id);
 
 static void cam_frame_timer_cb(lv_timer_t *timer);
@@ -288,10 +288,10 @@ static void camera_page_on_stop(view_t *self)
 }
 
 /* 点击分发: 返回主界面 */
-static void camera_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+static void camera_page_on_click(view_t *self, const char *click_id, intptr_t user_data)
 {
     (void)self;
-    (void)arg;
+    (void)user_data;
 
     if (click_id != NULL && strcmp(click_id, "back") == 0)
     {

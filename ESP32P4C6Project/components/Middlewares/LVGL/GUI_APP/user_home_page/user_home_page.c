@@ -42,7 +42,7 @@ static void home_deinit(view_t *self);
 static void home_on_start(view_t *self);
 static void home_on_resume(view_t *self);
 static void home_on_stop(view_t *self);
-static void home_on_click(view_t *self, const char *click_id, intptr_t arg);
+static void home_on_click(view_t *self, const char *click_id, intptr_t user_data);
 
 /**********************
  *   STATIC VARIABLES
@@ -263,10 +263,10 @@ static void home_on_stop(view_t *self)
 }
 
 /* 点击分发: 所有按钮点击在此按 click_id 字符串统一处理 */
-static void home_on_click(view_t *self, const char *click_id, intptr_t arg)
+static void home_on_click(view_t *self, const char *click_id, intptr_t user_data)
 {
     (void)self;
-    (void)arg;
+    (void)user_data;
 
     if (click_id == NULL)
     {
