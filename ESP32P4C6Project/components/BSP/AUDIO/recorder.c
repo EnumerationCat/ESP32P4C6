@@ -68,6 +68,9 @@ static volatile bool s_playing = false;     /* 是否正在播放 */
 static volatile bool s_play_stop_req = false;   /* 播放任务是否退出 */
 static SemaphoreHandle_t s_play_done = NULL;    /* 播放任务退出信号 */
 
+static recorder_done_cb_t s_rec_done_cb = NULL;      /* 录音任务结束回调 */
+static recorder_play_done_cb_t s_play_done_cb = NULL;/* 播放任务结束回调 */
+
 /* 播放任务参数(由 recorder_play 申请, 播放任务释放) */
 typedef struct
 {
@@ -189,6 +192,12 @@ done:
 
     s_bytes = total;
     s_recording = false;
+
+    if (s_rec_done_cb != NULL)
+    {
+        s_rec_done_cb();
+    }
+
     xSemaphoreGive(s_done);
 
     ESP_LOGI(TAG, "recording saved: %lu bytes", (unsigned long)total);
@@ -235,6 +244,12 @@ static void playback_task(void *arg)
         }
 
         s_playing = false;
+
+        if (s_play_done_cb != NULL)
+        {
+            s_play_done_cb();
+        }
+
         xSemaphoreGive(s_play_done);
         vTaskDelete(NULL);
         return;
@@ -265,6 +280,12 @@ static void playback_task(void *arg)
     i2s_trx_stop();
 
     s_playing = false;
+
+    if (s_play_done_cb != NULL)
+    {
+        s_play_done_cb();
+    }
+
     xSemaphoreGive(s_play_done);
 
     ESP_LOGI(TAG, "playback finished");
@@ -520,4 +541,14 @@ esp_err_t recorder_play_stop(void)
 bool recorder_is_playing(void)
 {
     return s_playing;
+}
+
+void recorder_set_done_cb(recorder_done_cb_t cb)
+{
+    s_rec_done_cb = cb;
+}
+
+void recorder_set_play_done_cb(recorder_play_done_cb_t cb)
+{
+    s_play_done_cb = cb;
 }

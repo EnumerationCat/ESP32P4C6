@@ -16,6 +16,11 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
+/* 录音/播放任务结束回调: 在各自任务上下文中调用, 不得操作LVGL,
+ * 只适合投递队列/置标志(供上层桥接成UI事件) */
+typedef void (*recorder_done_cb_t)(void);
+typedef void (*recorder_play_done_cb_t)(void);
+
 /* 开始录音: 校验SD/编解码器/I2S, 创建目录与文件, 启动录音任务
  * 返回 ESP_OK 表示已开始; 其他值表示失败(未创建任务) */
 esp_err_t recorder_start(void);
@@ -42,5 +47,11 @@ esp_err_t recorder_play_stop(void);
 
 /* 是否正在播放 */
 bool recorder_is_playing(void);
+
+/* 注册录音任务结束回调(文件已关闭); 传NULL取消 */
+void recorder_set_done_cb(recorder_done_cb_t cb);
+
+/* 注册播放任务结束回调; 传NULL取消 */
+void recorder_set_play_done_cb(recorder_play_done_cb_t cb);
 
 #endif /* __RECORDER_H */

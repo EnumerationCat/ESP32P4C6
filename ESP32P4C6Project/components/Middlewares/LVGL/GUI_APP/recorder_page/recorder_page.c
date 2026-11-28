@@ -18,6 +18,9 @@
 #include "lvgl.h"
 #include "recorder.h"
 #include "sdmmc.h"
+#include "app_event.h"
+
+#include <string.h>
 
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -50,6 +53,7 @@ static void recorder_page_on_resume(view_t *self);
 static void recorder_page_on_pause(view_t *self);
 static void recorder_page_on_stop(view_t *self);
 static void recorder_page_on_update(view_t *self);
+static void recorder_page_on_event(view_t *self, const char *event_id);
 
 static recorder_page_ui_t s_ui =
 {
@@ -64,6 +68,7 @@ static recorder_page_ui_t s_ui =
         .on_pause  = recorder_page_on_pause,
         .on_stop   = recorder_page_on_stop,
         .on_update = recorder_page_on_update,
+        .on_event  = recorder_page_on_event,
     },
 };
 
@@ -381,12 +386,28 @@ static void recorder_page_on_update(view_t *self)
     refresh_ui(self, false);
 }
 
+/* 录音任务结束回调(运行在recorder任务中, 只投递事件, 不碰LVGL) */
+static void recorder_done_event_cb(void)
+{
+    app_event_post("rec_done");
+}
+
+/* 事件分发: 录音任务结束 -> 立即刷新状态/文件名(仅当前页会收到) */
+static void recorder_page_on_event(view_t *self, const char *event_id)
+{
+    if (event_id != NULL && strcmp(event_id, "rec_done") == 0)
+    {
+        refresh_ui(self, true);
+    }
+}
+
 /**********************
  *   GLOBAL FUNCTIONS
  **********************/
 
 void recorder_page_init(void)
 {
+    recorder_set_done_cb(recorder_done_event_cb);
     page_manager_init();
     page_register(&s_ui.base);
 }

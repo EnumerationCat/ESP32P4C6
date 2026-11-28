@@ -301,9 +301,11 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				LVGL/GUI_APP/Framework/Manage/list_head.c
 				LVGL/GUI_APP/Framework/Manage/page_manager.c
 				LVGL/GUI_APP/Framework/Manage/page_init.c
+				LVGL/GUI_APP/Framework/Manage/app_event.c
 				LVGL/GUI_APP/Framework/shell_core.c
 				LVGL/GUI_APP/Framework/command.c
 				LVGL/GUI_APP/Framework/Model/shell_input_uart.c
+				LVGL/GUI_APP/Framework/Model/wifi_scan_model.c
 )
 
 set(include_dirs wifi_manager

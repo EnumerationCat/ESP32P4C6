@@ -8,6 +8,7 @@
 
 #include "page_manager.h"
 #include "popup_manager.h"
+#include "app_event.h"
 #include "container_of.h"
 
 /* 全局唯一的页面管理器实例(静态零初始化) */
@@ -108,6 +109,7 @@ static void resume_top_page(page_manager_t *pm)
 void page_manager_init(void)
 {
     manager_ensure_init(&g_page_manager);
+    app_event_init();
 }
 
 bool page_register(view_t *view)
@@ -280,6 +282,9 @@ void page_manager_tick(void)
     view_t *top;
 
     manager_ensure_init(pm);
+
+    /* 先排空其它任务投递的应用事件(在本任务里转成当前页面 on_event) */
+    app_event_drain();
 
     /* 弹窗独立刷新(压在下面的弹窗也要更新), 再刷新当前页面 */
     popup_manager_tick();

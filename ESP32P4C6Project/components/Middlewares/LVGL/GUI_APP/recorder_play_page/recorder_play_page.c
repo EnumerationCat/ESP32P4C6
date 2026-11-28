@@ -15,6 +15,7 @@
 #include "lcd.h"
 #include "recorder.h"
 #include "sdmmc.h"
+#include "app_event.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -53,6 +54,7 @@ static void play_page_on_resume(view_t *self);
 static void play_page_on_pause(view_t *self);
 static void play_page_on_stop(view_t *self);
 static void play_page_on_update(view_t *self);
+static void play_page_on_event(view_t *self, const char *event_id);
 static void file_btn_event_cb(lv_event_t *e);
 
 static recorder_play_page_ui_t s_ui =
@@ -68,6 +70,7 @@ static recorder_play_page_ui_t s_ui =
         .on_pause  = play_page_on_pause,
         .on_stop   = play_page_on_stop,
         .on_update = play_page_on_update,
+        .on_event  = play_page_on_event,
     },
 };
 
@@ -409,12 +412,47 @@ static void play_page_on_update(view_t *self)
     }
 }
 
+/* 播放任务结束回调(运行在播放任务中, 只投递事件, 不碰LVGL) */
+static void play_done_event_cb(void)
+{
+    app_event_post("play_done");
+}
+
+/* 事件分发: 播放自然结束 -> 恢复停止按钮/状态(仅当前页会收到) */
+static void play_page_on_event(view_t *self, const char *event_id)
+{
+    (void)self;
+
+    if (event_id == NULL || strcmp(event_id, "play_done") != 0)
+    {
+        return;
+    }
+
+    if (recorder_is_playing())
+    {
+        return;             /* 已被新的播放接管, 忽略旧的结束事件 */
+    }
+
+    s_ui.last_playing = false;
+
+    if (s_ui.stop_btn != NULL)
+    {
+        lv_obj_add_state(s_ui.stop_btn, LV_STATE_DISABLED);
+    }
+
+    if (s_ui.status_label != NULL)
+    {
+        lv_label_set_text(s_ui.status_label, "Stopped");
+    }
+}
+
 /**********************
  *   GLOBAL FUNCTIONS
  **********************/
 
 void recorder_play_page_init(void)
 {
+    recorder_set_play_done_cb(play_done_event_cb);
     page_manager_init();
     page_register(&s_ui.base);
 }

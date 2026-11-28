@@ -3,8 +3,8 @@
  * @brief WiFi连接页: 下拉框选择热点 + 密码输入框/键盘 + 连接
  *
  * 与其它页面相同的 C 式继承: base 必须是第一个成员。
- * 扫描由 wifi_manager_scan() 在独立任务中完成, 回调里只把 SSID 拷进
- * 受互斥锁保护的缓冲区并置标志, 真正刷新下拉框放在 on_update(LVGL任务)。
+ * 扫描由 wifi_manager_scan() 在独立任务中完成, 结果写入 wifi_scan_model
+ * (Model层, 带锁缓存); 本页只负责取走字符串渲染下拉框并产生事件。
  */
 
 #include "wifi_page.h"
@@ -15,20 +15,17 @@
 #include "lvgl.h"
 #include "wifi_manager.h"
 #include "ap_wifi.h"
+#include "app_event.h"
+#include "wifi_scan_model.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 
 static const char *TAG = "wifi_page";
 
-#define WIFI_MAX_AP             20                          /* 下拉框最多展示的热点数 */
-#define WIFI_SSID_LEN           33                          /* SSID 最大长度(含结束符) */
-#define WIFI_OPTIONS_LEN        (WIFI_MAX_AP * WIFI_SSID_LEN + 1)
 #define WIFI_SCAN_WAIT_US       (12 * 1000 * 1000)          /* 扫描超时 */
 #define WIFI_CONNECT_WAIT_US    (15 * 1000 * 1000)          /* 连接超时 */
 
@@ -59,6 +56,7 @@ static void wifi_page_on_start(view_t *self);
 static void wifi_page_on_resume(view_t *self);
 static void wifi_page_on_stop(view_t *self);
 static void wifi_page_on_update(view_t *self);
+static void wifi_page_on_event(view_t *self, const char *event_id);
 
 static wifi_page_ui_t s_ui =
 {
@@ -72,21 +70,9 @@ static wifi_page_ui_t s_ui =
         .on_resume = wifi_page_on_resume,
         .on_stop   = wifi_page_on_stop,
         .on_update = wifi_page_on_update,
+        .on_event  = wifi_page_on_event,
     },
 };
-
-/* 扫描结果上下文: 扫描任务写, LVGL任务读, 用互斥锁保护 */
-typedef struct
-{
-    SemaphoreHandle_t lock;                     /* 保护 list/count 的互斥锁 */
-    char list[WIFI_MAX_AP][WIFI_SSID_LEN];      /* 扫描到的SSID */
-    int count;                                  /* 有效SSID数量 */
-    volatile bool ready;                        /* 有新结果待应用到界面 */
-    volatile bool busy;                         /* 扫描进行中 */
-    char options[WIFI_OPTIONS_LEN];             /* 下拉框用换行拼接串 */
-} wifi_scan_ctx_t;
-
-static wifi_scan_ctx_t s_scan = {0};
 
 /**********************
  *   内部辅助
@@ -98,56 +84,24 @@ static inline wifi_page_ui_t *wifi_ui(view_t *self)
     return container_of(self, wifi_page_ui_t, base);
 }
 
-/* 扫描完成回调(运行在扫描任务中, 不能操作LVGL) */
+/* 扫描完成回调(运行在扫描任务中, 不能操作LVGL): 写Model并投递事件 */
 static void wifi_scan_cb(int num, wifi_ap_record_t *records)
 {
-    int n = (num > 0) ? num : 0;
+    wifi_scan_model_on_result(num, records);
 
-    if (n > WIFI_MAX_AP)
-    {
-        n = WIFI_MAX_AP;
-    }
-
-    if (s_scan.lock != NULL)
-    {
-        xSemaphoreTake(s_scan.lock, portMAX_DELAY);
-    }
-
-    s_scan.count = 0;
-
-    for (int i = 0; i < n; i++)
-    {
-        const char *ssid = (const char *)records[i].ssid;
-
-        if (ssid[0] == '\0')
-        {
-            continue;               /* 隐藏SSID无法手动连接, 跳过 */
-        }
-
-        strlcpy(s_scan.list[s_scan.count], ssid, WIFI_SSID_LEN);
-        s_scan.count++;
-    }
-
-    if (s_scan.lock != NULL)
-    {
-        xSemaphoreGive(s_scan.lock);
-    }
-
-    s_scan.busy  = false;
-    s_scan.ready = true;
+    /* 通知LVGL任务立即上屏; 页面不可见时由 on_update 兜底 */
+    app_event_post("wifi_scan_done");
 }
 
 /* 发起扫描(幂等: 正在扫描时忽略) */
 static void wifi_scan_start(wifi_page_ui_t *ui)
 {
-    if (s_scan.busy)
+    if (!wifi_scan_model_begin())
     {
         return;
     }
 
-    s_scan.busy        = true;
-    s_scan.ready       = false;
-    ui->scan_deadline  = esp_timer_get_time() + WIFI_SCAN_WAIT_US;
+    ui->scan_deadline = esp_timer_get_time() + WIFI_SCAN_WAIT_US;
 
     if (ui->status_label != NULL)
     {
@@ -156,7 +110,7 @@ static void wifi_scan_start(wifi_page_ui_t *ui)
 
     if (wifi_manager_scan(wifi_scan_cb) != ESP_OK)
     {
-        s_scan.busy = false;
+        wifi_scan_model_timeout();
 
         if (ui->status_label != NULL)
         {
@@ -168,44 +122,15 @@ static void wifi_scan_start(wifi_page_ui_t *ui)
 /* 把扫描结果刷到下拉框(LVGL任务中调用) */
 static void wifi_apply_scan(wifi_page_ui_t *ui)
 {
-    int n;
-    size_t pos = 0;
+    int n = 0;
+    const char *options = wifi_scan_model_take_options(&n);
 
-    s_scan.ready = false;
-
-    if (s_scan.lock != NULL)
+    if (options == NULL)
     {
-        xSemaphoreTake(s_scan.lock, portMAX_DELAY);
+        return;
     }
 
-    n = s_scan.count;
-    s_scan.options[0] = '\0';
-
-    for (int i = 0; i < n; i++)
-    {
-        size_t len = strlen(s_scan.list[i]);
-
-        if (pos + len + 2 > sizeof(s_scan.options))
-        {
-            break;
-        }
-
-        if (pos > 0)
-        {
-            s_scan.options[pos++] = '\n';
-        }
-
-        memcpy(&s_scan.options[pos], s_scan.list[i], len);
-        pos += len;
-        s_scan.options[pos] = '\0';
-    }
-
-    if (s_scan.lock != NULL)
-    {
-        xSemaphoreGive(s_scan.lock);
-    }
-
-    if (pos == 0)
+    if (n <= 0 || options[0] == '\0')
     {
         lv_dropdown_set_options(ui->ap_dd, "No AP found");
         lv_dropdown_set_selected(ui->ap_dd, 0);
@@ -213,7 +138,7 @@ static void wifi_apply_scan(wifi_page_ui_t *ui)
         return;
     }
 
-    lv_dropdown_set_options(ui->ap_dd, s_scan.options);
+    lv_dropdown_set_options(ui->ap_dd, options);    /* 下拉框会复制该字符串 */
     lv_dropdown_set_selected(ui->ap_dd, 0);
     lv_label_set_text_fmt(ui->status_label, "%d network(s), select one", n);
 }
@@ -259,6 +184,37 @@ static void wifi_refresh_status(wifi_page_ui_t *ui, int64_t now)
     {
         ui->last_connected = false;
         lv_label_set_text(ui->status_label, "Disconnected");
+    }
+}
+
+/* WiFi状态变化回调(运行在esp_event任务中, 只投递事件, 不碰LVGL) */
+static void wifi_state_event_cb(WIFI_STATE state)
+{
+    app_event_post(state == WIFI_STATE_CONNECTED ? "wifi_connected"
+                                                 : "wifi_disconnected");
+}
+
+/* 事件分发: 扫描完成/连接状态变化(由框架派发给当前页) */
+static void wifi_page_on_event(view_t *self, const char *event_id)
+{
+    wifi_page_ui_t *ui = wifi_ui(self);
+
+    if (event_id == NULL || ui->screen == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(event_id, "wifi_scan_done") == 0)
+    {
+        if (wifi_scan_model_is_ready())
+        {
+            wifi_apply_scan(ui);        /* 扫描结果立即上屏, 不等 on_update 轮询 */
+        }
+    }
+    else if (strcmp(event_id, "wifi_connected") == 0 ||
+             strcmp(event_id, "wifi_disconnected") == 0)
+    {
+        wifi_refresh_status(ui, esp_timer_get_time());
     }
 }
 
@@ -439,7 +395,7 @@ static void wifi_page_destroy(view_t *self)
     ui->kb           = NULL;
     ui->status_label = NULL;
 
-    s_scan.ready     = false;
+    wifi_scan_model_clear_ready();
     ui->connecting   = false;
     ui->last_connected = false;
 }
@@ -489,13 +445,13 @@ static void wifi_page_on_update(view_t *self)
 
     ui->last_update_us = now;
 
-    if (s_scan.ready)
+    if (wifi_scan_model_is_ready())
     {
         wifi_apply_scan(ui);
     }
-    else if (s_scan.busy && now >= ui->scan_deadline)
+    else if (wifi_scan_model_is_busy() && now >= ui->scan_deadline)
     {
-        s_scan.busy = false;
+        wifi_scan_model_timeout();
         lv_label_set_text(ui->status_label, "Scan timeout, tap SCAN");
     }
 
@@ -513,9 +469,9 @@ void wifi_page_init(void)
     if (!wifi_inited)
     {
         /* WiFi协议栈初始化(原在main): 启动STA但不连接任何热点,
-         * 具体连哪个由本页面选择 */
-        ap_wifi_init(NULL);
-        s_scan.lock = xSemaphoreCreateMutex();
+         * 具体连哪个由本页面选择; 连接状态变更通过 app_event 投递给LVGL任务 */
+        ap_wifi_init(wifi_state_event_cb);
+        wifi_scan_model_init();
         wifi_inited = true;
     }
 
