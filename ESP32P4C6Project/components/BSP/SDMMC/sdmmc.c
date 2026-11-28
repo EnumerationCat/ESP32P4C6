@@ -157,7 +157,7 @@ esp_err_t sdmmc_init_raw(void)
     if (ret != ESP_OK)
     {
         ESP_LOGE(sdmmc_tag, "host init slot failed: %s", esp_err_to_name(ret));
-        host.deinit();
+        sdmmc_host_deinit_slot(host.slot);      /* 只拆本槽, 保留Hosted占用的Slot1和共享控制器 */
         return ret;
     }
 
@@ -165,7 +165,7 @@ esp_err_t sdmmc_init_raw(void)
     if (card == NULL)
     {
         ESP_LOGE(sdmmc_tag, "no memory for card");
-        sdmmc_host_deinit();
+        sdmmc_host_deinit_slot(host.slot);      /* 只拆本槽, 保留Hosted占用的Slot1和共享控制器 */
         return ESP_ERR_NO_MEM;
     }
 
@@ -175,7 +175,7 @@ esp_err_t sdmmc_init_raw(void)
         ESP_LOGE(sdmmc_tag, "card init failed: %s", esp_err_to_name(ret));
         free(card);
         card = NULL;
-        sdmmc_host_deinit();
+        sdmmc_host_deinit_slot(host.slot);      /* 只拆本槽, 保留Hosted占用的Slot1和共享控制器 */
         sdmmc_mount_state = SDMMC_MOUNT_STATE_FAILED;
         return ret;
     }
@@ -187,6 +187,10 @@ esp_err_t sdmmc_init_raw(void)
 
 /**
  * @brief       反初始化裸模式(USB MSC退出时调用)
+ * @note        SD卡和ESP-Hosted(SDIO)共用同一个SDMMC控制器: 卡在Slot0,
+ *              Hosted的SDIO在Slot1。这里必须只拆Slot0, 绝不能调用
+ *              sdmmc_host_deinit()(它会连Slot1和控制器一起拆掉, 导致之后
+ *              打开WiFi页面访问SDIO时复位)。Hosted自己也只拆自己的槽。
  * @param       无
  * @retval      ESP_OK:成功
  */
@@ -197,7 +201,7 @@ esp_err_t sdmmc_deinit_raw(void)
         return ESP_OK;
     }
 
-    sdmmc_host_deinit();
+    sdmmc_host_deinit_slot(SDMMC_HOST_SLOT_0);  /* 只拆本槽, 保留Hosted占用的Slot1和共享控制器 */
 
     free(card);
     card = NULL;
