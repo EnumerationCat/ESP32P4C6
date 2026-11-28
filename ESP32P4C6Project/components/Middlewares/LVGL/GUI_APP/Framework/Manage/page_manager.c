@@ -257,6 +257,25 @@ view_t *page_current(void)
     return list_top(&pm->ready);
 }
 
+bool manager_click(const char *click_id, intptr_t arg)
+{
+    view_t *top;
+
+    if (click_id == NULL)
+    {
+        return false;
+    }
+
+    top = page_current();
+    if (top == NULL || top->on_click == NULL)
+    {
+        return false;
+    }
+
+    top->on_click(top, click_id, arg);
+    return true;
+}
+
 bool manager_event(const char *event_id)
 {
     view_t *top;

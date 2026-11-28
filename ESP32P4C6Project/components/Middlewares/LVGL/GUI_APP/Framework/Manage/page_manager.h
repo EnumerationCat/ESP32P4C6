@@ -13,7 +13,8 @@
  *  - page_open  -> 顶层页 on_pause 并挂起, 新页 on_start
  *  - page_close -> 当前页 on_stop, 恢复挂起栈顶页 on_start
  *  - tick       -> 先刷新所有弹窗, 再驱动当前页面(ready栈顶)的 on_update
- *  - event      -> manager_event 把事件ID派发给当前页面(ready栈顶)的 on_event
+ *  - click      -> manager_click 把控件点击派发给当前页面(ready栈顶)的 on_click
+ *  - event      -> manager_event 把异步事件ID派发给当前页面(ready栈顶)的 on_event
  *
  * 页面对象必须长期存活(静态/全局), 管理器只串指针, 不负责内存。
  */
@@ -102,9 +103,20 @@ void page_back(void);
 bool manager_gopage(uint16_t id);
 
 /**
- * @brief       向当前页面派发事件(Controller统一入口)
- * @note        控件/输入回调只产出事件ID, 由本函数转发给 ready栈顶页面 的
- *              on_event; 页面未实现 on_event 时忽略。只能在LVGL任务中调用
+ * @brief       向当前页面派发控件点击(输入统一入口)
+ * @note        控件回调只产出 点击ID+附加参数, 由本函数转发给 ready栈顶页面 的
+ *              on_click; 页面未实现 on_click 时忽略。只能在LVGL任务中调用
+ * @param       click_id: 控件标识字符串(以'\0'结尾)
+ * @param       arg     : 附加参数(如列表行号), 无则传0
+ * @retval      true:已派发; false:无当前页面或该页未实现on_click
+ */
+bool manager_click(const char *click_id, intptr_t arg);
+
+/**
+ * @brief       向当前页面派发异步事件(Controller统一入口)
+ * @note        事件来自 Service/后端(经 app_event 队列), 由本函数转发给
+ *              ready栈顶页面 的 on_event; 页面未实现 on_event 时忽略。
+ *              只能在LVGL任务中调用(由 page_manager_tick 排空队列时驱动)
  * @param       event_id: 事件ID字符串(以'\0'结尾)
  * @retval      true:已派发; false:无当前页面或该页未实现on_event
  */

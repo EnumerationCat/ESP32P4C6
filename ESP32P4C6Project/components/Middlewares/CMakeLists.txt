@@ -301,6 +301,7 @@ set(src_dirs    wifi_manager/wifi_manager.c
 				LVGL/GUI_APP/Framework/Manage/list_head.c
 				LVGL/GUI_APP/Framework/Manage/page_manager.c
 				LVGL/GUI_APP/Framework/Manage/page_init.c
+				LVGL/GUI_APP/Framework/View/view_bind.c
 				LVGL/GUI_APP/Framework/Service/app_event.c
 				LVGL/GUI_APP/Framework/Service/recorder_event_service.c
 				LVGL/GUI_APP/Framework/Service/wifi_event_service.c

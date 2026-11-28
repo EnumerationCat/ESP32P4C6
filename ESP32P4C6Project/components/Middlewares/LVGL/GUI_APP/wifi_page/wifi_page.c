@@ -12,6 +12,7 @@
 #include "user_home_page.h"
 #include "page_manager.h"
 #include "view.h"
+#include "view_bind.h"
 #include "container_of.h"
 #include "lvgl.h"
 #include "wifi_manager.h"
@@ -57,6 +58,7 @@ static void wifi_page_on_start(view_t *self);
 static void wifi_page_on_resume(view_t *self);
 static void wifi_page_on_stop(view_t *self);
 static void wifi_page_on_update(view_t *self);
+static void wifi_page_on_click(view_t *self, const char *click_id, intptr_t arg);
 static void wifi_page_on_event(view_t *self, const char *event_id);
 
 static wifi_page_ui_t s_ui =
@@ -71,6 +73,7 @@ static wifi_page_ui_t s_ui =
         .on_resume = wifi_page_on_resume,
         .on_stop   = wifi_page_on_stop,
         .on_update = wifi_page_on_update,
+        .on_click  = wifi_page_on_click,
         .on_event  = wifi_page_on_event,
     },
 };
@@ -204,28 +207,12 @@ static void wifi_page_on_event(view_t *self, const char *event_id)
 }
 
 /**********************
- *   按钮回调
+ *   按钮点击
  **********************/
 
-/* 左上角返回主界面 */
-static void back_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-    manager_gopage(USER_HOME_PAGE_ID);
-}
-
-/* 右上角重新扫描 */
-static void scan_btn_event_cb(lv_event_t *e)
-{
-    view_t *self = (view_t *)lv_event_get_user_data(e);
-
-    wifi_scan_start(wifi_ui(self));
-}
-
 /* 连接所选热点 */
-static void connect_btn_event_cb(lv_event_t *e)
+static void wifi_connect(view_t *self)
 {
-    view_t *self = (view_t *)lv_event_get_user_data(e);
     wifi_page_ui_t *ui = wifi_ui(self);
     char ssid[WIFI_SSID_LEN];
 
@@ -250,9 +237,8 @@ static void connect_btn_event_cb(lv_event_t *e)
 }
 
 /* 断开当前热点 */
-static void disconnect_btn_event_cb(lv_event_t *e)
+static void wifi_disconnect(view_t *self)
 {
-    view_t *self = (view_t *)lv_event_get_user_data(e);
     wifi_page_ui_t *ui = wifi_ui(self);
 
     wifi_manager_disconnect();
@@ -261,6 +247,34 @@ static void disconnect_btn_event_cb(lv_event_t *e)
     ui->last_connected = false;
     ui->target_ssid[0] = '\0';
     lv_label_set_text(ui->status_label, "Disconnected");
+}
+
+/* 点击分发 */
+static void wifi_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+{
+    (void)arg;
+
+    if (click_id == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(click_id, "back") == 0)
+    {
+        manager_gopage(USER_HOME_PAGE_ID);
+    }
+    else if (strcmp(click_id, "scan") == 0)
+    {
+        wifi_scan_start(wifi_ui(self));
+    }
+    else if (strcmp(click_id, "connect") == 0)
+    {
+        wifi_connect(self);
+    }
+    else if (strcmp(click_id, "disconnect") == 0)
+    {
+        wifi_disconnect(self);
+    }
 }
 
 /**********************
@@ -300,7 +314,7 @@ static void wifi_page_create(view_t *self)
     back_btn = lv_btn_create(ui->screen);
     lv_obj_set_size(back_btn, 64, 36);
     lv_obj_align(back_btn, LV_ALIGN_TOP_LEFT, 8, 8);
-    lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(back_btn, "back", 0);
 
     label = lv_label_create(back_btn);
     lv_label_set_text(label, "Back");
@@ -310,7 +324,7 @@ static void wifi_page_create(view_t *self)
     scan_btn = lv_btn_create(ui->screen);
     lv_obj_set_size(scan_btn, 64, 36);
     lv_obj_align(scan_btn, LV_ALIGN_TOP_RIGHT, -8, 8);
-    lv_obj_add_event_cb(scan_btn, scan_btn_event_cb, LV_EVENT_CLICKED, self);
+    view_bind_click(scan_btn, "scan", 0);
 
     label = lv_label_create(scan_btn);
     lv_label_set_text(label, "SCAN");
@@ -335,7 +349,7 @@ static void wifi_page_create(view_t *self)
     connect_btn = lv_btn_create(ui->screen);
     lv_obj_set_size(connect_btn, 130, 44);
     lv_obj_align(connect_btn, LV_ALIGN_TOP_MID, -72, 152);
-    lv_obj_add_event_cb(connect_btn, connect_btn_event_cb, LV_EVENT_CLICKED, self);
+    view_bind_click(connect_btn, "connect", 0);
 
     label = lv_label_create(connect_btn);
     lv_label_set_text(label, "CONNECT");
@@ -344,7 +358,7 @@ static void wifi_page_create(view_t *self)
     lv_obj_t *disconnect_btn = lv_btn_create(ui->screen);
     lv_obj_set_size(disconnect_btn, 130, 44);
     lv_obj_align(disconnect_btn, LV_ALIGN_TOP_MID, 72, 152);
-    lv_obj_add_event_cb(disconnect_btn, disconnect_btn_event_cb, LV_EVENT_CLICKED, self);
+    view_bind_click(disconnect_btn, "disconnect", 0);
 
     label = lv_label_create(disconnect_btn);
     lv_label_set_text(label, "DISCONNECT");

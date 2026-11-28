@@ -10,10 +10,13 @@
 #include "user_home_page.h"
 #include "page_manager.h"
 #include "view.h"
+#include "view_bind.h"
 #include "container_of.h"
 #include "lvgl.h"
 #include "sdmmc.h"
 #include "usb_msc_device.h"
+
+#include <string.h>
 
 #include "esp_log.h"
 
@@ -37,6 +40,7 @@ static void usb_disk_page_destroy(view_t *self);
 static void usb_disk_page_on_start(view_t *self);
 static void usb_disk_page_on_resume(view_t *self);
 static void usb_disk_page_on_stop(view_t *self);
+static void usb_disk_page_on_click(view_t *self, const char *click_id, intptr_t arg);
 
 static usb_disk_page_ui_t s_ui =
 {
@@ -49,6 +53,7 @@ static usb_disk_page_ui_t s_ui =
         .on_start  = usb_disk_page_on_start,
         .on_resume = usb_disk_page_on_resume,
         .on_stop   = usb_disk_page_on_stop,
+        .on_click  = usb_disk_page_on_click,
     },
 };
 
@@ -92,15 +97,10 @@ static void usb_disk_refresh(usb_disk_page_ui_t *ui)
     }
 }
 
-/* 进入/退出按钮 */
-static void toggle_btn_event_cb(lv_event_t *e)
+/* 进入/退出U盘模式 */
+static void usb_disk_toggle(view_t *self)
 {
-    usb_disk_page_ui_t *ui = usb_disk_ui((view_t *)lv_event_get_user_data(e));
-
-    if (ui == NULL)
-    {
-        return;
-    }
+    usb_disk_page_ui_t *ui = usb_disk_ui(self);
 
     if (!usb_msc_device_active())
     {
@@ -124,17 +124,30 @@ static void toggle_btn_event_cb(lv_event_t *e)
     usb_disk_refresh(ui);
 }
 
-/* 返回主界面(如果还在U盘模式先退出) */
-static void back_btn_event_cb(lv_event_t *e)
+/* 点击分发 */
+static void usb_disk_page_on_click(view_t *self, const char *click_id, intptr_t arg)
 {
-    (void)e;
+    (void)arg;
 
-    if (usb_msc_device_active())
+    if (click_id == NULL)
     {
-        usb_msc_device_stop();
+        return;
     }
 
-    manager_gopage(USER_HOME_PAGE_ID);
+    if (strcmp(click_id, "toggle") == 0)
+    {
+        usb_disk_toggle(self);
+    }
+    else if (strcmp(click_id, "back") == 0)
+    {
+        /* 返回主界面(如果还在U盘模式先退出) */
+        if (usb_msc_device_active())
+        {
+            usb_msc_device_stop();
+        }
+
+        manager_gopage(USER_HOME_PAGE_ID);
+    }
 }
 
 /**********************
@@ -169,7 +182,7 @@ static void usb_disk_page_create(view_t *self)
     lv_label_set_text(back_label, "Back");
     lv_obj_center(back_label);
 
-    lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(back_btn, "back", 0);
 
     /* 状态提示 */
     ui->status = lv_label_create(ui->screen);
@@ -187,7 +200,7 @@ static void usb_disk_page_create(view_t *self)
     ui->toggle_label = lv_label_create(ui->toggle_btn);
     lv_obj_center(ui->toggle_label);
 
-    lv_obj_add_event_cb(ui->toggle_btn, toggle_btn_event_cb, LV_EVENT_CLICKED, self);
+    view_bind_click(ui->toggle_btn, "toggle", 0);
 
     usb_disk_refresh(ui);
 }

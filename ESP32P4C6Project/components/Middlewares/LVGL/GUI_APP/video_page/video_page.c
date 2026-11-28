@@ -14,6 +14,7 @@
 #include "user_home_page.h"
 #include "page_manager.h"
 #include "view.h"
+#include "view_bind.h"
 #include "container_of.h"
 #include "lvgl.h"
 #include "lcd.h"
@@ -43,6 +44,7 @@ static void video_page_destroy(view_t *self);
 static void video_page_on_start(view_t *self);
 static void video_page_on_resume(view_t *self);
 static void video_page_on_stop(view_t *self);
+static void video_page_on_click(view_t *self, const char *click_id, intptr_t arg);
 static void video_page_on_event(view_t *self, const char *event_id);
 
 /* .avi 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
@@ -59,6 +61,7 @@ static video_page_ui_t s_ui =
         .on_start  = video_page_on_start,
         .on_resume = video_page_on_resume,
         .on_stop   = video_page_on_stop,
+        .on_click  = video_page_on_click,
         .on_event  = video_page_on_event,
     },
 };
@@ -71,31 +74,6 @@ static video_page_ui_t s_ui =
 static inline video_page_ui_t *video_ui(view_t *self)
 {
     return container_of(self, video_page_ui_t, base);
-}
-
-/* 列表按钮点击: 启动播放 */
-static void video_btn_event_cb(lv_event_t *e)
-{
-    int index = (int)(intptr_t)lv_event_get_user_data(e);
-    const char *path = file_list_path(&s_files, index);
-
-    if (path == NULL)
-    {
-        return;
-    }
-
-    esp_err_t ret = videoplay_play(path);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "play %s failed: %s", path, esp_err_to_name(ret));
-    }
-}
-
-/* 返回主界面 */
-static void back_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-    manager_gopage(USER_HOME_PAGE_ID);
 }
 
 /**********************
@@ -131,7 +109,7 @@ static void video_page_create(view_t *self)
     lv_label_set_text(back_label, "Back");
     lv_obj_center(back_label);
 
-    lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(back_btn, "back", 0);
 
     /* 文件列表 */
     ui->list = lv_list_create(ui->screen);
@@ -156,7 +134,7 @@ static void video_page_create(view_t *self)
     for (int i = 0; i < count; i++)
     {
         lv_obj_t *btn = lv_list_add_btn(ui->list, NULL, file_list_name(&s_files, i));
-        lv_obj_add_event_cb(btn, video_btn_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        view_bind_click(btn, "file", i);
     }
 }
 
@@ -201,6 +179,39 @@ static void video_page_on_resume(view_t *self)
 static void video_page_on_stop(view_t *self)
 {
     video_page_destroy(self);
+}
+
+/* 点击分发: 返回 / 列表行播放 */
+static void video_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+{
+    (void)self;
+
+    if (click_id == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(click_id, "back") == 0)
+    {
+        manager_gopage(USER_HOME_PAGE_ID);
+        return;
+    }
+
+    if (strcmp(click_id, "file") == 0)
+    {
+        const char *path = file_list_path(&s_files, (int)arg);
+
+        if (path == NULL)
+        {
+            return;
+        }
+
+        esp_err_t ret = videoplay_play(path);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "play %s failed: %s", path, esp_err_to_name(ret));
+        }
+    }
 }
 
 /* 事件分发: 播放结束 - 播放器独占过 LCD, 整屏重绘找回界面(仅当前页会收到) */

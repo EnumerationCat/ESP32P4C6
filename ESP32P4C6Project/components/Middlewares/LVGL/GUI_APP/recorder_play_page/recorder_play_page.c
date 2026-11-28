@@ -11,6 +11,7 @@
 #include "recorder_page.h"
 #include "page_manager.h"
 #include "view.h"
+#include "view_bind.h"
 #include "container_of.h"
 #include "lvgl.h"
 #include "lcd.h"
@@ -50,8 +51,8 @@ static void play_page_on_resume(view_t *self);
 static void play_page_on_pause(view_t *self);
 static void play_page_on_stop(view_t *self);
 static void play_page_on_update(view_t *self);
+static void play_page_on_click(view_t *self, const char *click_id, intptr_t arg);
 static void play_page_on_event(view_t *self, const char *event_id);
-static void file_btn_event_cb(lv_event_t *e);
 
 /* .wav 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
 static file_list_t s_files;
@@ -69,6 +70,7 @@ static recorder_play_page_ui_t s_ui =
         .on_pause  = play_page_on_pause,
         .on_stop   = play_page_on_stop,
         .on_update = play_page_on_update,
+        .on_click  = play_page_on_click,
         .on_event  = play_page_on_event,
     },
 };
@@ -114,18 +116,17 @@ static void populate_list(recorder_play_page_ui_t *ui)
     for (i = 0; i < count; i++)
     {
         lv_obj_t *btn = lv_list_add_btn(ui->list, NULL, file_list_name(&s_files, i));
-        lv_obj_add_event_cb(btn, file_btn_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        view_bind_click(btn, "file", i);
     }
 }
 
 /**********************
- *   按钮回调
+ *   按钮点击
  **********************/
 
 /* 点击文件: 停止当前播放并播放所选文件 */
-static void file_btn_event_cb(lv_event_t *e)
+static void play_file(int index)
 {
-    int index = (int)(intptr_t)lv_event_get_user_data(e);
     const char *path = file_list_path(&s_files, index);
     esp_err_t ret;
 
@@ -157,21 +158,37 @@ static void file_btn_event_cb(lv_event_t *e)
 }
 
 /* 停止播放 */
-static void stop_btn_event_cb(lv_event_t *e)
+static void play_stop(void)
 {
-    (void)e;
-
     recorder_play_stop();
     lv_label_set_text(s_ui.status_label, "Stopped");
     lv_obj_add_state(s_ui.stop_btn, LV_STATE_DISABLED);
     s_ui.last_playing = false;
 }
 
-/* 返回录音页(切页触发 on_pause, 播放随之停止) */
-static void back_btn_event_cb(lv_event_t *e)
+/* 点击分发 */
+static void play_page_on_click(view_t *self, const char *click_id, intptr_t arg)
 {
-    (void)e;
-    manager_gopage(RECORDER_PAGE_ID);
+    (void)self;
+
+    if (click_id == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(click_id, "file") == 0)
+    {
+        play_file((int)arg);
+    }
+    else if (strcmp(click_id, "stop") == 0)
+    {
+        play_stop();
+    }
+    else if (strcmp(click_id, "back") == 0)
+    {
+        /* 切页触发 on_pause, 播放随之停止 */
+        manager_gopage(RECORDER_PAGE_ID);
+    }
 }
 
 /**********************
@@ -210,7 +227,7 @@ static void play_page_create(view_t *self)
     lv_label_set_text(back_label, "Back");
     lv_obj_center(back_label);
 
-    lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(back_btn, "back", 0);
 
     /* 状态 */
     ui->status_label = lv_label_create(ui->screen);
@@ -231,7 +248,7 @@ static void play_page_create(view_t *self)
     lv_obj_set_size(ui->stop_btn, 140, 48);
     lv_obj_align(ui->stop_btn, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_obj_add_state(ui->stop_btn, LV_STATE_DISABLED);      /* 初始未播放 */
-    lv_obj_add_event_cb(ui->stop_btn, stop_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(ui->stop_btn, "stop", 0);
 
     stop_label = lv_label_create(ui->stop_btn);
     lv_label_set_text(stop_label, "STOP");

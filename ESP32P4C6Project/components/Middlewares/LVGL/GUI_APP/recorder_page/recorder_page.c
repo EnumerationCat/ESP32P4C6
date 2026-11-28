@@ -14,6 +14,7 @@
 #include "user_home_page.h"
 #include "page_manager.h"
 #include "view.h"
+#include "view_bind.h"
 #include "container_of.h"
 #include "lvgl.h"
 #include "recorder.h"
@@ -52,6 +53,7 @@ static void recorder_page_on_resume(view_t *self);
 static void recorder_page_on_pause(view_t *self);
 static void recorder_page_on_stop(view_t *self);
 static void recorder_page_on_update(view_t *self);
+static void recorder_page_on_click(view_t *self, const char *click_id, intptr_t arg);
 static void recorder_page_on_event(view_t *self, const char *event_id);
 
 static recorder_page_ui_t s_ui =
@@ -67,6 +69,7 @@ static recorder_page_ui_t s_ui =
         .on_pause  = recorder_page_on_pause,
         .on_stop   = recorder_page_on_stop,
         .on_update = recorder_page_on_update,
+        .on_click  = recorder_page_on_click,
         .on_event  = recorder_page_on_event,
     },
 };
@@ -142,13 +145,12 @@ static void refresh_ui(view_t *self, bool force)
 }
 
 /**********************
- *   按钮回调
+ *   按钮点击
  **********************/
 
 /* 开始录音 */
-static void rec_btn_event_cb(lv_event_t *e)
+static void rec_start(view_t *self)
 {
-    view_t *self = (view_t *)lv_event_get_user_data(e);
     recorder_page_ui_t *ui = recorder_ui(self);
     esp_err_t ret;
 
@@ -175,10 +177,8 @@ static void rec_btn_event_cb(lv_event_t *e)
 }
 
 /* 停止并保存 */
-static void stop_btn_event_cb(lv_event_t *e)
+static void rec_stop(view_t *self)
 {
-    view_t *self = (view_t *)lv_event_get_user_data(e);
-
     if (recorder_stop() != ESP_OK)
     {
         ESP_LOGW(TAG, "stop recording failed");
@@ -187,18 +187,34 @@ static void stop_btn_event_cb(lv_event_t *e)
     refresh_ui(self, true);
 }
 
-/* 返回主界面(切页会触发 on_pause, 录音随之停止保存) */
-static void back_btn_event_cb(lv_event_t *e)
+/* 点击分发 */
+static void recorder_page_on_click(view_t *self, const char *click_id, intptr_t arg)
 {
-    (void)e;
-    manager_gopage(USER_HOME_PAGE_ID);
-}
+    (void)arg;
 
-/* 进入录音回放列表(切页触发 on_pause, 正在录音会先停止保存) */
-static void list_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-    manager_gopage(RECORDER_PLAY_PAGE_ID);
+    if (click_id == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(click_id, "rec") == 0)
+    {
+        rec_start(self);
+    }
+    else if (strcmp(click_id, "stop") == 0)
+    {
+        rec_stop(self);
+    }
+    else if (strcmp(click_id, "list") == 0)
+    {
+        /* 切页触发 on_pause, 正在录音会先停止保存 */
+        manager_gopage(RECORDER_PLAY_PAGE_ID);
+    }
+    else if (strcmp(click_id, "back") == 0)
+    {
+        /* 切页会触发 on_pause, 录音随之停止保存 */
+        manager_gopage(USER_HOME_PAGE_ID);
+    }
 }
 
 /**********************
@@ -240,7 +256,7 @@ static void recorder_page_create(view_t *self)
     lv_label_set_text(back_label, "Back");
     lv_obj_center(back_label);
 
-    lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(back_btn, "back", 0);
 
     /* 录音回放列表按钮(右上角) */
     list_btn = lv_btn_create(ui->screen);
@@ -251,7 +267,7 @@ static void recorder_page_create(view_t *self)
     lv_label_set_text(list_label, "LIST");
     lv_obj_center(list_label);
 
-    lv_obj_add_event_cb(list_btn, list_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(list_btn, "list", 0);
 
     /* 录音时长 */
     ui->time_label = lv_label_create(ui->screen);
@@ -270,7 +286,7 @@ static void recorder_page_create(view_t *self)
     ui->rec_btn = lv_btn_create(ui->screen);
     lv_obj_set_size(ui->rec_btn, 160, 56);
     lv_obj_align(ui->rec_btn, LV_ALIGN_TOP_MID, 0, 150);
-    lv_obj_add_event_cb(ui->rec_btn, rec_btn_event_cb, LV_EVENT_CLICKED, self);
+    view_bind_click(ui->rec_btn, "rec", 0);
 
     label = lv_label_create(ui->rec_btn);
     lv_label_set_text(label, "REC");
@@ -280,7 +296,7 @@ static void recorder_page_create(view_t *self)
     ui->stop_btn = lv_btn_create(ui->screen);
     lv_obj_set_size(ui->stop_btn, 160, 56);
     lv_obj_align(ui->stop_btn, LV_ALIGN_TOP_MID, 0, 222);
-    lv_obj_add_event_cb(ui->stop_btn, stop_btn_event_cb, LV_EVENT_CLICKED, self);
+    view_bind_click(ui->stop_btn, "stop", 0);
 
     label = lv_label_create(ui->stop_btn);
     lv_label_set_text(label, "STOP&SAVE");

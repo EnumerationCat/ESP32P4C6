@@ -18,6 +18,7 @@
 #include "shell_core.h"
 #include "shell_input_uart.h"
 #include "view.h"
+#include "view_bind.h"
 #include "page_manager.h"
 #include "user_home_page.h"
 #include "container_of.h"
@@ -64,7 +65,7 @@ static void shell_on_pause(view_t *self);
 static void shell_on_resume(view_t *self);
 static void shell_on_update(view_t *self);
 static void shell_on_stop(view_t *self);
-static void shell_on_event(view_t *self, const char *event_id);
+static void shell_on_click(view_t *self, const char *click_id, intptr_t arg);
 
 /**********************
  *   STATIC VARIABLES
@@ -82,7 +83,7 @@ static shell_ui_t s_ui =
         .on_resume = shell_on_resume,
         .on_update = shell_on_update,
         .on_stop   = shell_on_stop,
-        .on_event  = shell_on_event,
+        .on_click  = shell_on_click,
     },
 };
 
@@ -96,14 +97,6 @@ static char s_tick_buf[SHELL_BUF_SIZE + 1];    /* 终端文本快照缓冲 */
 static inline shell_ui_t *shell_ui(view_t *self)
 {
     return container_of(self, shell_ui_t, base);
-}
-
-/* HOME按钮: 事件交给框架统一派发给当前页面 */
-static void shell_home_btn_cb(lv_event_t *e)
-{
-    (void)e;
-
-    manager_event("home");
 }
 
 /* 把光标竖条定位到输入行的当前光标处
@@ -231,7 +224,7 @@ static void shell_init(view_t *self)
     lv_obj_t *home = lv_btn_create(bar);
     lv_obj_set_size(home, 64, SHELL_BAR_H - 8);
     lv_obj_align(home, LV_ALIGN_RIGHT_MID, -4, 0);
-    lv_obj_add_event_cb(home, shell_home_btn_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(home, "home", 0);
 
     lv_obj_t *home_label = lv_label_create(home);
     lv_label_set_text(home_label, "HOME");
@@ -340,17 +333,18 @@ static void shell_on_stop(view_t *self)
     shell_deinit(self);
 }
 
-/* 事件分发: 按eventID字符串比较 */
-static void shell_on_event(view_t *self, const char *event_id)
+/* 点击分发: 按 click_id 字符串比较 */
+static void shell_on_click(view_t *self, const char *click_id, intptr_t arg)
 {
     (void)self;
+    (void)arg;
 
-    if (event_id == NULL)
+    if (click_id == NULL)
     {
         return;
     }
 
-    if (strcmp(event_id, "home") == 0)
+    if (strcmp(click_id, "home") == 0)
     {
         /* 交给页面管理器: 本页挂起(on_pause), 主界面恢复(on_resume) */
         manager_gopage(USER_HOME_PAGE_ID);

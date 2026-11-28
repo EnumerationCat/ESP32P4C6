@@ -14,6 +14,7 @@
 #include "user_home_page.h"
 #include "page_manager.h"
 #include "view.h"
+#include "view_bind.h"
 #include "container_of.h"
 #include "camera_stream_service.h"
 #include "lvgl.h"
@@ -44,6 +45,7 @@ static void camera_page_on_start(view_t *self);
 static void camera_page_on_pause(view_t *self);
 static void camera_page_on_resume(view_t *self);
 static void camera_page_on_stop(view_t *self);
+static void camera_page_on_click(view_t *self, const char *click_id, intptr_t arg);
 static void camera_page_on_event(view_t *self, const char *event_id);
 
 static void cam_frame_timer_cb(lv_timer_t *timer);
@@ -62,6 +64,7 @@ static camera_page_ui_t s_ui =
         .on_pause  = camera_page_on_pause,
         .on_resume = camera_page_on_resume,
         .on_stop   = camera_page_on_stop,
+        .on_click  = camera_page_on_click,
         .on_event  = camera_page_on_event,
     },
     .dsc =
@@ -181,13 +184,6 @@ static void cam_display_stop(camera_page_ui_t *ui)
  *   界面
  **********************/
 
-/* 返回主界面 */
-static void back_btn_event_cb(lv_event_t *e)
-{
-    (void)e;
-    manager_gopage(USER_HOME_PAGE_ID);
-}
-
 /* 创建相机页控件(幂等) */
 static void camera_page_create(view_t *self)
 {
@@ -216,7 +212,7 @@ static void camera_page_create(view_t *self)
     lv_label_set_text(back_label, "Back");
     lv_obj_center(back_label);
 
-    lv_obj_add_event_cb(back_btn, back_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    view_bind_click(back_btn, "back", 0);
 }
 
 /* 销毁相机页控件 */
@@ -289,6 +285,18 @@ static void camera_page_on_stop(view_t *self)
 {
     cam_display_stop(camera_ui(self));
     camera_page_destroy(self);
+}
+
+/* 点击分发: 返回主界面 */
+static void camera_page_on_click(view_t *self, const char *click_id, intptr_t arg)
+{
+    (void)self;
+    (void)arg;
+
+    if (click_id != NULL && strcmp(click_id, "back") == 0)
+    {
+        manager_gopage(USER_HOME_PAGE_ID);
+    }
 }
 
 /* 事件分发: 采集异常 -> 显示提示(仅当前页会收到) */
