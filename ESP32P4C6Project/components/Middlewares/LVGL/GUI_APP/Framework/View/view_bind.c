@@ -1,10 +1,11 @@
 /**
  * @file view_bind.c
- * @brief 视图控件绑定辅助实现: LVGL点击 -> manager_click
+ * @brief 控件绑定辅助实现: LVGL点击 -> manager_click
  */
 
 #include "view_bind.h"
 #include "page_manager.h"
+#include "lvgl.h"
 
 /* 点击适配: click_id 放在事件 user_data, user_data 放在控件 user_data */
 static void view_click_cb(lv_event_t *e)
