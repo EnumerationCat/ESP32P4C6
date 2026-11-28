@@ -14,7 +14,7 @@
 /* 播放任务收尾: 在 videoplay 任务中执行 */
 static void video_done_bridge(void)
 {
-    app_event_post("video_done");
+    app_event_post("video_done", 0);
 }
 
 void video_event_service_init(void)

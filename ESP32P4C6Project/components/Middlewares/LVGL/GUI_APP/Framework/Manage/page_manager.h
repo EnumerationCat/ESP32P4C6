@@ -117,10 +117,11 @@ bool manager_click(const char *click_id, intptr_t user_data);
  * @note        事件来自 Service/后端(经 app_event 队列), 由本函数转发给
  *              ready栈顶页面 的 on_event; 页面未实现 on_event 时忽略。
  *              只能在LVGL任务中调用(由 page_manager_tick 排空队列时驱动)
- * @param       event_id: 事件ID字符串(以'\0'结尾)
+ * @param       event_id : 事件ID字符串(以'\0'结尾)
+ * @param       user_data: 事件附带参数(按值), 无则传0
  * @retval      true:已派发; false:无当前页面或该页未实现on_event
  */
-bool manager_event(const char *event_id);
+bool manager_event(const char *event_id, intptr_t user_data);
 
 /**
  * @brief       当前页面(ready栈顶, 不含弹窗)

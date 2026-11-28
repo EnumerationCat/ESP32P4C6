@@ -46,7 +46,7 @@ static void camera_page_on_pause(view_t *self);
 static void camera_page_on_resume(view_t *self);
 static void camera_page_on_stop(view_t *self);
 static void camera_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
-static void camera_page_on_event(view_t *self, const char *event_id);
+static void camera_page_on_event(view_t *self, const char *event_id, intptr_t user_data);
 
 static void cam_frame_timer_cb(lv_timer_t *timer);
 static bool cam_display_start(camera_page_ui_t *ui);
@@ -300,9 +300,11 @@ static void camera_page_on_click(view_t *self, const char *click_id, intptr_t us
 }
 
 /* 事件分发: 采集异常 -> 显示提示(仅当前页会收到) */
-static void camera_page_on_event(view_t *self, const char *event_id)
+static void camera_page_on_event(view_t *self, const char *event_id, intptr_t user_data)
 {
     camera_page_ui_t *ui = camera_ui(self);
+
+    (void)user_data;
 
     if (event_id == NULL || ui->screen == NULL)
     {

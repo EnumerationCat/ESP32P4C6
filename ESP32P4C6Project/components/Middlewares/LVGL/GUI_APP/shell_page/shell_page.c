@@ -8,7 +8,7 @@
  *   on_resume           从挂起栈恢复(重新载入屏幕)
  *   on_update           周期刷新(presenter: 拉model快照 -> view)
  *   on_stop             停止页面
- *   on_event            事件分发(按eventID字符串比较)
+ *   on_click            点击分发(按click_id字符串比较)
  *
  * 回调第一个参数是 view_t *self(基类指针), 用 container_of 还原出 shell_ui_t。
  * 本文件只在LVGL任务中运行; 数据全部来自 shell_core 的快照。

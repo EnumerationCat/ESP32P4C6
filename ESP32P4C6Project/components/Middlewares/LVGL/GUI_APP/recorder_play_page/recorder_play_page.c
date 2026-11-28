@@ -52,7 +52,7 @@ static void play_page_on_pause(view_t *self);
 static void play_page_on_stop(view_t *self);
 static void play_page_on_update(view_t *self);
 static void play_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
-static void play_page_on_event(view_t *self, const char *event_id);
+static void play_page_on_event(view_t *self, const char *event_id, intptr_t user_data);
 
 /* .wav 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
 static file_list_t s_files;
@@ -373,9 +373,10 @@ static void play_page_on_update(view_t *self)
 }
 
 /* 事件分发: 播放自然结束 -> 恢复停止按钮/状态(仅当前页会收到) */
-static void play_page_on_event(view_t *self, const char *event_id)
+static void play_page_on_event(view_t *self, const char *event_id, intptr_t user_data)
 {
     (void)self;
+    (void)user_data;
 
     if (event_id == NULL || strcmp(event_id, "play_done") != 0)
     {

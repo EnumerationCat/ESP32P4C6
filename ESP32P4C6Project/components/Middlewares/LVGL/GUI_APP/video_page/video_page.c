@@ -45,7 +45,7 @@ static void video_page_on_start(view_t *self);
 static void video_page_on_resume(view_t *self);
 static void video_page_on_stop(view_t *self);
 static void video_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
-static void video_page_on_event(view_t *self, const char *event_id);
+static void video_page_on_event(view_t *self, const char *event_id, intptr_t user_data);
 
 /* .avi 路径缓存; 单独静态存储(未初始化 -> .bss), 不随 s_ui 的初始化进 flash */
 static file_list_t s_files;
@@ -215,9 +215,11 @@ static void video_page_on_click(view_t *self, const char *click_id, intptr_t use
 }
 
 /* 事件分发: 播放结束 - 播放器独占过 LCD, 整屏重绘找回界面(仅当前页会收到) */
-static void video_page_on_event(view_t *self, const char *event_id)
+static void video_page_on_event(view_t *self, const char *event_id, intptr_t user_data)
 {
     video_page_ui_t *ui = video_ui(self);
+
+    (void)user_data;
 
     if (event_id == NULL || ui->screen == NULL)
     {

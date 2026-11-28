@@ -113,7 +113,7 @@ static void capture_task(void *arg)
             if (++fails >= CAM_ERR_THRESHOLD && !err_reported)
             {
                 err_reported = true;
-                app_event_post("cam_error");
+                app_event_post("cam_error", 0);
             }
         }
     }

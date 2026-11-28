@@ -54,7 +54,7 @@ static void recorder_page_on_pause(view_t *self);
 static void recorder_page_on_stop(view_t *self);
 static void recorder_page_on_update(view_t *self);
 static void recorder_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
-static void recorder_page_on_event(view_t *self, const char *event_id);
+static void recorder_page_on_event(view_t *self, const char *event_id, intptr_t user_data);
 
 static recorder_page_ui_t s_ui =
 {
@@ -402,8 +402,10 @@ static void recorder_page_on_update(view_t *self)
 }
 
 /* 事件分发: 录音任务结束 -> 立即刷新状态/文件名(仅当前页会收到) */
-static void recorder_page_on_event(view_t *self, const char *event_id)
+static void recorder_page_on_event(view_t *self, const char *event_id, intptr_t user_data)
 {
+    (void)user_data;
+
     if (event_id != NULL && strcmp(event_id, "rec_done") == 0)
     {
         refresh_ui(self, true);

@@ -18,14 +18,14 @@
 static void wifi_scan_bridge(int num, wifi_ap_record_t *records)
 {
     wifi_scan_model_on_result(num, records);
-    app_event_post("wifi_scan_done");
+    app_event_post("wifi_scan_done", 0);
 }
 
 /* 连接状态变化(esp_event 任务上下文) */
 static void wifi_state_bridge(WIFI_STATE state)
 {
     app_event_post(state == WIFI_STATE_CONNECTED ? "wifi_connected"
-                                                 : "wifi_disconnected");
+                                                 : "wifi_disconnected", 0);
 }
 
 void wifi_event_service_init(void)

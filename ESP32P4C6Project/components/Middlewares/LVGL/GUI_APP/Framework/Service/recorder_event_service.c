@@ -15,13 +15,13 @@
 /* 录音任务收尾(文件已关闭): 在 recorder 任务中执行 */
 static void rec_done_bridge(void)
 {
-    app_event_post("rec_done");
+    app_event_post("rec_done", 0);
 }
 
 /* 播放任务收尾: 在 playback 任务中执行 */
 static void play_done_bridge(void)
 {
-    app_event_post("play_done");
+    app_event_post("play_done", 0);
 }
 
 void recorder_event_service_init(void)

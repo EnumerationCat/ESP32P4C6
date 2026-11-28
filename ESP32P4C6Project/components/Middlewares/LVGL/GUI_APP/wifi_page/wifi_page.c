@@ -59,7 +59,7 @@ static void wifi_page_on_resume(view_t *self);
 static void wifi_page_on_stop(view_t *self);
 static void wifi_page_on_update(view_t *self);
 static void wifi_page_on_click(view_t *self, const char *click_id, intptr_t user_data);
-static void wifi_page_on_event(view_t *self, const char *event_id);
+static void wifi_page_on_event(view_t *self, const char *event_id, intptr_t user_data);
 
 static wifi_page_ui_t s_ui =
 {
@@ -183,9 +183,11 @@ static void wifi_refresh_status(wifi_page_ui_t *ui, int64_t now)
 }
 
 /* 事件分发: 扫描完成/连接状态变化(由框架派发给当前页) */
-static void wifi_page_on_event(view_t *self, const char *event_id)
+static void wifi_page_on_event(view_t *self, const char *event_id, intptr_t user_data)
 {
     wifi_page_ui_t *ui = wifi_ui(self);
+
+    (void)user_data;
 
     if (event_id == NULL || ui->screen == NULL)
     {

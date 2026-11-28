@@ -52,8 +52,8 @@ struct view
     void (*on_stop)(view_t *self);                        /* 停止视图 */
     /* 控件点击: click_id为控件标识字符串, user_data为附加参数(列表行号等) */
     void (*on_click)(view_t *self, const char *click_id, intptr_t user_data);
-    /* 异步事件: 由 Service/后端经 app_event 投递的字符串ID */
-    void (*on_event)(view_t *self, const char *event_id);
+    /* 异步事件: 由 Service/后端经 app_event 投递的字符串ID, user_data为附带参数(按值) */
+    void (*on_event)(view_t *self, const char *event_id, intptr_t user_data);
 };
 
 #ifdef __cplusplus

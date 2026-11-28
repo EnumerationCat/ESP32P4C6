@@ -276,7 +276,7 @@ bool manager_click(const char *click_id, intptr_t user_data)
     return true;
 }
 
-bool manager_event(const char *event_id)
+bool manager_event(const char *event_id, intptr_t user_data)
 {
     view_t *top;
 
@@ -291,7 +291,7 @@ bool manager_event(const char *event_id)
         return false;
     }
 
-    top->on_event(top, event_id);
+    top->on_event(top, event_id, user_data);
     return true;
 }
 
@@ -303,7 +303,7 @@ void page_manager_tick(void)
     manager_ensure_init(pm);
 
     /* 先排空其它任务投递的应用事件(在本任务里转成当前页面 on_event) */
-    app_event_drain();
+    app_event_consume();
 
     /* 弹窗独立刷新(压在下面的弹窗也要更新), 再刷新当前页面 */
     popup_manager_tick();
